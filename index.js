@@ -69,13 +69,26 @@ function leave(ws) {
   if (!room) return;
   room.members.delete(ws);
   ws.room = null;
+  // Keep empty invite rooms alive so a partner can still claim the code
+  // even if the inviter closes the app / Wi‑Fi blips. TTL sweeper removes them later.
   if (room.members.size === 0) {
-    rooms.delete(room.code);
+    room.emptySince = Date.now();
     return;
   }
+  room.emptySince = null;
   for (const peer of room.members.keys()) send(peer, roomPayload(room, peer));
   broadcast(room, { type: "system", text: "partner left" });
 }
+
+const ROOM_TTL_MS = 60 * 60 * 1000; // 1 hour
+setInterval(() => {
+  const now = Date.now();
+  for (const [code, room] of rooms) {
+    if (room.members.size > 0) continue;
+    const idle = room.emptySince || room.updatedAt || 0;
+    if (now - idle > ROOM_TTL_MS) rooms.delete(code);
+  }
+}, 60_000).unref?.();
 
 async function serveStatic(req, res) {
   let path = (req.url || "/").split("?")[0];
@@ -128,6 +141,7 @@ wss.on("connection", (ws) => {
         fullness: Number.isFinite(msg.fullness) ? msg.fullness : 80,
         happiness: Number.isFinite(msg.happiness) ? msg.happiness : 80,
         updatedAt: Date.now(),
+        emptySince: null,
         members: new Map([[ws, name]]),
       };
       rooms.set(room.code, room);
@@ -142,6 +156,8 @@ wss.on("connection", (ws) => {
       leave(ws);
       const name = String(msg.name || "friend").slice(0, 24);
       room.members.set(ws, name);
+      room.emptySince = null;
+      room.updatedAt = Date.now();
       ws.room = room;
       for (const peer of room.members.keys()) send(peer, roomPayload(room, peer));
       return broadcast(room, { type: "system", text: `${name} joined` }, ws);

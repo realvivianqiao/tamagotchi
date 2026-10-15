@@ -409,9 +409,50 @@ struct FriendBond: Codable, Equatable {
     case "system":
       onStatus?(json["text"] as? String ?? "ok")
     case "error":
-      onStatus?(json["text"] as? String ?? "error")
+      let text = (json["text"] as? String) ?? "error"
+      let code = json["code"] as? String
+      onStatus?(text)
+      // Render redeploys wipe /tmp invites — re-register waiting codes, else mark dead.
+      if text.contains("room not found"), let code {
+        Task { @MainActor in
+          await self.healMissingRoom(code: code)
+        }
+      }
     default:
       break
+    }
+  }
+
+  /// After a server wipe: host re-posts the same invite code; guest is told to re-claim.
+  private func healMissingRoom(code: String) async {
+    guard let i = friends.firstIndex(where: { $0.code == code }) else { return }
+    if friends[i].waiting {
+      onStatus?("invite expired — restoring \(code)…")
+      do {
+        let res = try await postJSON(path: "/api/invite", body: [
+          "name": displayName,
+          "code": code,
+          "fullness": friends[i].fullness,
+          "happiness": friends[i].happiness,
+        ])
+        let restored = (res["code"] as? String) ?? code
+        friends[i].lastActivity = "invite restored — send \(restored) again"
+        saveFriends()
+        onFriendsChanged?()
+        attach(code: restored)
+        onStatus?("waiting · code \(restored) (send it again)")
+      } catch {
+        friends[i].lastActivity = "invite dead — make a new one"
+        saveFriends()
+        onFriendsChanged?()
+        onStatus?("couldn’t restore invite — Invite friend again")
+      }
+    } else {
+      friends[i].online = false
+      friends[i].lastActivity = "server reset — re-claim their new code"
+      saveFriends()
+      onFriendsChanged?()
+      onStatus?("bond expired — ask \(friends[i].partnerName) for a fresh invite")
     }
   }
 

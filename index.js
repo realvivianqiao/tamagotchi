@@ -224,24 +224,35 @@ const httpServer = createServer(async (req, res) => {
   if (req.method === "POST" && url === "/api/invite") {
     const body = await readJson(req);
     const name = String(body.name || "friend").slice(0, 24);
-    const c = uniqueCode();
+    // Optional: restore a known code after a Render redeploy wiped /tmp
+    const wanted = String(body.code || "")
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "")
+      .slice(0, 6);
+    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const usable =
+      wanted.length === 6 && [...wanted].every((ch) => alphabet.includes(ch));
+    const c = usable ? wanted : uniqueCode();
+    const prev = invites.get(c);
     const inv = {
       hostName: name,
-      guestName: null,
-      fullness: Number.isFinite(body.fullness) ? body.fullness : 80,
-      happiness: Number.isFinite(body.happiness) ? body.happiness : 80,
-      createdAt: Date.now(),
+      guestName: prev?.guestName || null,
+      fullness: Number.isFinite(body.fullness) ? body.fullness : prev?.fullness ?? 80,
+      happiness: Number.isFinite(body.happiness) ? body.happiness : prev?.happiness ?? 80,
+      createdAt: prev?.createdAt || Date.now(),
     };
     invites.set(c, inv);
     // also warm a live room so WS attach is instant
-    rooms.set(c, {
-      code: c,
-      fullness: inv.fullness,
-      happiness: inv.happiness,
-      updatedAt: Date.now(),
-      emptySince: Date.now(),
-      members: new Map(),
-    });
+    if (!rooms.has(c)) {
+      rooms.set(c, {
+        code: c,
+        fullness: inv.fullness,
+        happiness: inv.happiness,
+        updatedAt: Date.now(),
+        emptySince: Date.now(),
+        members: new Map(),
+      });
+    }
     await saveInvites();
     return json(res, 200, { code: c });
   }
@@ -257,6 +268,17 @@ const httpServer = createServer(async (req, res) => {
       return json(res, 409, { error: "room full", code: c });
     }
     inv.guestName = name;
+    // warm room so both can attach right after claim
+    if (!rooms.has(c)) {
+      rooms.set(c, {
+        code: c,
+        fullness: inv.fullness,
+        happiness: inv.happiness,
+        updatedAt: Date.now(),
+        emptySince: null,
+        members: new Map(),
+      });
+    }
     await saveInvites();
     return json(res, 200, {
       code: c,

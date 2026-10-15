@@ -65,18 +65,33 @@ async function saveInvites() {
   }
 }
 
-function roomPayload(room, self) {
+function ensureRoomMaps(room) {
   if (!room.species) room.species = new Map(); // displayName -> species
+  if (!room.stats) room.stats = new Map(); // displayName -> {fullness,happiness,updatedAt}
+}
+
+function memberStats(room, name) {
+  ensureRoomMaps(room);
+  if (!name) return null;
+  return room.stats.get(name) || null;
+}
+
+function roomPayload(room, self) {
+  ensureRoomMaps(room);
   const online = [...room.members.values()];
   const others = [...room.members.entries()]
     .filter(([ws]) => ws !== self)
     .map(([, name]) => name);
   const partner = others[0] || null;
+  const pStats = memberStats(room, partner);
+  // Prefer the partner's own last-reported stats — never the shared leftover blob.
+  const fullness = pStats?.fullness ?? room.fullness;
+  const happiness = pStats?.happiness ?? room.happiness;
   return {
     type: "room",
     code: room.code,
-    fullness: room.fullness,
-    happiness: room.happiness,
+    fullness,
+    happiness,
     updatedAt: room.updatedAt,
     you: room.members.get(self) || "",
     partner,
@@ -99,7 +114,10 @@ function broadcast(room, msg, except = null) {
 
 function ensureRoom(code) {
   let room = rooms.get(code);
-  if (room) return room;
+  if (room) {
+    ensureRoomMaps(room);
+    return room;
+  }
   const inv = invites.get(code);
   if (!inv) return null;
   room = {
@@ -109,7 +127,16 @@ function ensureRoom(code) {
     updatedAt: Date.now(),
     emptySince: Date.now(),
     members: new Map(),
+    species: new Map(),
+    stats: new Map(),
   };
+  if (inv.hostName) {
+    room.stats.set(inv.hostName, {
+      fullness: inv.fullness,
+      happiness: inv.happiness,
+      updatedAt: inv.createdAt || Date.now(),
+    });
+  }
   rooms.set(code, room);
   return room;
 }
@@ -245,14 +272,22 @@ const httpServer = createServer(async (req, res) => {
     invites.set(c, inv);
     // also warm a live room so WS attach is instant
     if (!rooms.has(c)) {
-      rooms.set(c, {
+      const warm = {
         code: c,
         fullness: inv.fullness,
         happiness: inv.happiness,
         updatedAt: Date.now(),
         emptySince: Date.now(),
         members: new Map(),
+        species: new Map(),
+        stats: new Map(),
+      };
+      warm.stats.set(name, {
+        fullness: inv.fullness,
+        happiness: inv.happiness,
+        updatedAt: inv.createdAt,
       });
+      rooms.set(c, warm);
     }
     await saveInvites();
     return json(res, 200, { code: c });
@@ -271,14 +306,24 @@ const httpServer = createServer(async (req, res) => {
     inv.guestName = name;
     // warm room so both can attach right after claim
     if (!rooms.has(c)) {
-      rooms.set(c, {
+      const warm = {
         code: c,
         fullness: inv.fullness,
         happiness: inv.happiness,
         updatedAt: Date.now(),
         emptySince: null,
         members: new Map(),
-      });
+        species: new Map(),
+        stats: new Map(),
+      };
+      if (inv.hostName) {
+        warm.stats.set(inv.hostName, {
+          fullness: inv.fullness,
+          happiness: inv.happiness,
+          updatedAt: inv.createdAt,
+        });
+      }
+      rooms.set(c, warm);
     }
     await saveInvites();
     return json(res, 200, {
@@ -321,7 +366,7 @@ wss.on("connection", (ws) => {
       if (room.members.size >= 2 && ![...room.members.values()].includes(name)) {
         return send(ws, { type: "error", text: "already bonded (2 people max)", code: c });
       }
-      if (!room.species) room.species = new Map();
+      ensureRoomMaps(room);
       // replace existing socket for same name in THIS room only
       for (const [peer, n] of [...room.members]) {
         if (n === name && peer !== ws) {
@@ -367,6 +412,10 @@ wss.on("connection", (ws) => {
         updatedAt: Date.now(),
         emptySince: null,
         members: new Map([[ws, name]]),
+        species: new Map(),
+        stats: new Map([
+          [name, { fullness: inv.fullness, happiness: inv.happiness, updatedAt: Date.now() }],
+        ]),
       };
       rooms.set(c, room);
       ws.rooms.set(c, name);
@@ -378,31 +427,55 @@ wss.on("connection", (ws) => {
       const c = String(msg.code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
       const room = (c && rooms.get(c)) || ws.room;
       if (!room || !room.members.has(ws)) return;
-      const at = Number(msg.updatedAt) || Date.now();
-      if (at < room.updatedAt) return send(ws, roomPayload(room, ws));
-      if (Number.isFinite(msg.fullness)) room.fullness = Math.max(0, Math.min(100, msg.fullness));
-      if (Number.isFinite(msg.happiness)) room.happiness = Math.max(0, Math.min(100, msg.happiness));
-      room.updatedAt = at;
-      const inv = invites.get(room.code);
-      if (inv) {
-        inv.fullness = room.fullness;
-        inv.happiness = room.happiness;
-      }
+      ensureRoomMaps(room);
       const fromName = room.members.get(ws) || "";
+      const at = Number(msg.updatedAt) || Date.now();
+      const action = msg.action ? String(msg.action).slice(0, 24) : null;
+      const f = Number.isFinite(msg.fullness) ? Math.max(0, Math.min(100, msg.fullness)) : null;
+      const h = Number.isFinite(msg.happiness) ? Math.max(0, Math.min(100, msg.happiness)) : null;
+
+      // Stats always belong to the sender's own pet (per-member), never a shared blob
+      // that the other person's FriendBond / applyRoom can steal.
+      if (fromName && (f != null || h != null)) {
+        const prev = room.stats.get(fromName) || { fullness: 80, happiness: 80, updatedAt: 0 };
+        if (at >= (prev.updatedAt || 0)) {
+          room.stats.set(fromName, {
+            fullness: f ?? prev.fullness,
+            happiness: h ?? prev.happiness,
+            updatedAt: at,
+          });
+        }
+      }
       if (msg.species && fromName) {
-        if (!room.species) room.species = new Map();
         room.species.set(fromName, String(msg.species).toLowerCase().slice(0, 12));
       }
-      broadcast(room, {
+      // Keep legacy room.fullness as the sender's latest for invite warm-up only.
+      if (f != null) room.fullness = f;
+      if (h != null) room.happiness = h;
+      if (at >= room.updatedAt) room.updatedAt = at;
+      const inv = invites.get(room.code);
+      if (inv && fromName && fromName === inv.hostName) {
+        const st = room.stats.get(fromName);
+        if (st) {
+          inv.fullness = st.fullness;
+          inv.happiness = st.happiness;
+        }
+      }
+
+      const mine = memberStats(room, fromName);
+      const payload = {
         type: "sync",
         code: room.code,
-        fullness: room.fullness,
-        happiness: room.happiness,
-        updatedAt: room.updatedAt,
-        action: msg.action || null,
+        fullness: mine?.fullness ?? room.fullness,
+        happiness: mine?.happiness ?? room.happiness,
+        updatedAt: at,
+        action,
         from: fromName,
-        species: msg.species || (fromName && room.species?.get(fromName)) || null,
-      });
+        species: msg.species || (fromName && room.species.get(fromName)) || null,
+      };
+      // Don't echo actions back to the actor — local UI already recorded "you: pet".
+      // Stats-only syncs still fan out to peers (and skip the sender).
+      broadcast(room, payload, ws);
       return;
     }
 

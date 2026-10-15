@@ -76,8 +76,8 @@ import AppKit
     switch action {
     case "feed":
       set(.eat, seconds: 3)
-      emit("🦴")
-      say("nom! 🦴")
+      emit("🍖")
+      say("nom! 🍖")
     case "play":
       signaturePlay(seconds: 5)
     case "pet":

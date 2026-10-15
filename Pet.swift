@@ -28,7 +28,8 @@ import AppKit
 
   private var fullness: Double
   private var happiness: Double
-  private var petName = defaultPetName
+  /// Always your local pet label (Mochi) — never a friend's displayName.
+  private var petName: String { defaultPetName }
   private var applyingRemote = false
   private var onlineNote: String?
   private var hidden = false
@@ -103,7 +104,7 @@ import AppKit
       }
       self.partnerWasOnline = online
     }
-    // Friend sent an action at *you* — your dog reacts. Their stats stay on FriendBond only.
+    // Friend sent an action at *you* — your dog reacts. Never rename your pet to `from`.
     Online.shared.onSync = { [weak self] _, _, action, from in
       guard let self, let action, !self.hidden else { return }
       self.applyingRemote = true
@@ -111,7 +112,7 @@ import AppKit
       let who = from.isEmpty ? "friend" : from
       let line: String =
         switch action {
-        case "feed": "\(who) fed you! 🦴"
+        case "feed": "\(who) fed you! 🍖"
         case "play": "\(who) wants to play! 🎾"
         case "pet": "\(who) pet you! ❤️"
         case "nap": "\(who) tucked you in 💤"
@@ -121,6 +122,8 @@ import AppKit
       self.say(line, seconds: 2.5)
       self.applyingRemote = false
       self.save()
+      // Publish *your* new stats so their Friends list shows the real result.
+      self.pushOnline()
     }
     Online.shared.restoreBondIfAny()
   }
@@ -140,7 +143,7 @@ import AppKit
       fullness = min(100, fullness + 35)
       happiness = min(100, happiness + 4)
       set(.eat, seconds: 3)
-      emit("🦴")
+      emit("🍖")
     case "play":
       happiness = min(100, happiness + 12)
       startSignatureMove(seconds: 6)
@@ -700,28 +703,28 @@ import AppKit
   }
 
   @objc private func feed() {
-    guard fullness < 95 else {
-      return say(
-        species == .cow ? "full of grass~" :
-          species == .cat ? "…no." :
-          species == .bird ? "crop full!" :
-          species == .octopus ? "too full bloop" : "too full~ 😵")
-    }
+    // Always feed *your* pet — never no-op. Full pets still eat (second breakfast).
+    let wasFull = fullness >= 95
     fullness = min(100, fullness + 35)
-    happiness = min(100, happiness + 4)
+    happiness = min(100, happiness + (wasFull ? 2 : 4))
     let eatSec: Double = species == .cow ? 5 : species == .cat ? 2.5 : 3
     set(.eat, seconds: eatSec)
-    switch species {
-    case .dog:
-      say("nom nom 🦴"); emit("🦴")
-    case .cat:
-      say("…fine. 🐟"); emit("🐟")
-    case .cow:
-      say("*chew chew* 🌾"); emit("🌾", count: 2)
-    case .bird:
-      say("peck peck!"); emit("seed", count: 2)
-    case .octopus:
-      say("nom bloop 🦀"); emit("🦀")
+    if wasFull {
+      switch species {
+      case .dog: say("still hungry?? ok… 🍖"); emit("🍖")
+      case .cat: say("…more? fine. 🐟"); emit("🐟")
+      case .cow: say("more grass?? 🌾"); emit("🌾", count: 2)
+      case .bird: say("more seeds!!"); emit("seed", count: 2)
+      case .octopus: say("second snack 🦀"); emit("🦀")
+      }
+    } else {
+      switch species {
+      case .dog: say("nom nom 🍖"); emit("🍖")
+      case .cat: say("…fine. 🐟"); emit("🐟")
+      case .cow: say("*chew chew* 🌾"); emit("🌾", count: 2)
+      case .bird: say("peck peck!"); emit("seed", count: 2)
+      case .octopus: say("nom bloop 🦀"); emit("🦀")
+      }
     }
     pushOnline()
   }
@@ -823,7 +826,8 @@ import AppKit
     pushOnline()
   }
 
-  /// Send an action at a friend — their pet reacts (on their screen + visitor if shown).
+  /// Send an action at a friend — their pet reacts on *their* screen (+ visitor preview here).
+  /// Carries *your* stats only so they can refresh your FriendBond row — never renames anyone.
   private func sendToFriend(action: String, code: String, name: String) {
     Online.shared.setActive(code: code)
     Online.shared.sync(fullness: fullness, happiness: happiness, action: action, toCode: code)
@@ -1004,7 +1008,6 @@ import AppKit
 
   @objc private func onlineLeave() {
     Online.shared.leaveAllBonds()
-    petName = defaultPetName
     onlineNote = nil
     partnerWasOnline = false
     refreshStatusItem()
@@ -1029,7 +1032,7 @@ import AppKit
   @objc private func onlineSetName() {
     if let name = prompt(
       "Your name",
-      message: "Friends see this when they interact with you (your dog stays \(defaultPetName))",
+      message: "Friends see this when they pet/feed you (e.g. “Vivian pet you”). Your menu/Quit stay \(defaultPetName).",
       placeholder: Online.shared.displayName),
        !name.isEmpty
     {
@@ -1077,15 +1080,16 @@ import AppKit
     menu.addItem(info("👥 Friends     \(friends.count) total · \(onlineN) online"))
 
     if let note = onlineNote {
+      // Status only — does not retarget Feed / Quit away from your pet.
       menu.addItem(info("🔗 \(note)"))
     }
     menu.addItem(.separator())
-    // YOUR pet
+    // YOUR pet — Feed always targets you, never the friend you're watching.
     if !hidden {
-      menu.addItem(info("—— \(petName) \(species.emoji) ——"))
-      menu.addItem(item("🦴 Feed", #selector(feed)))
+      menu.addItem(info("—— \(petName) \(species.emoji) (you) ——"))
+      menu.addItem(item("🍖 Feed \(petName)", #selector(feed)))
       menu.addItem(item("🎾 Play", #selector(play)))
-      menu.addItem(item("🤚 Pet", #selector(petFromMenu)))
+      menu.addItem(item("✋ Pet", #selector(petFromMenu)))
       menu.addItem(item(activity == .sleep ? "☀️ Wake up" : "💤 Nap", #selector(toggleNap)))
       let speciesItem = NSMenuItem(title: "Choose pet…", action: nil, keyEquivalent: "")
       let speciesMenu = NSMenu()
@@ -1110,11 +1114,11 @@ import AppKit
     if let f = focus, !f.waiting {
       let who = f.partnerName
       let code = f.code
-      menu.addItem(info("—— \(who) \(f.petSpecies.emoji) ——"))
+      menu.addItem(info("—— \(who) \(f.petSpecies.emoji) (friend) ——"))
       menu.addItem(friendActionItem("👉 Poke \(who)", #selector(friendPoke(_:)), code: code))
-      menu.addItem(friendActionItem("🦴 Feed \(who)", #selector(friendFeed(_:)), code: code))
+      menu.addItem(friendActionItem("🍖 Feed \(who)", #selector(friendFeed(_:)), code: code))
       menu.addItem(friendActionItem("🎾 Play with \(who)", #selector(friendPlay(_:)), code: code))
-      menu.addItem(friendActionItem("🤚 Pet \(who)", #selector(friendPet(_:)), code: code))
+      menu.addItem(friendActionItem("✋ Pet \(who)", #selector(friendPet(_:)), code: code))
       menu.addItem(friendActionItem("💤 Tuck \(who) in", #selector(friendNap(_:)), code: code))
       if visitor?.code == code {
         menu.addItem(item("👋 Hide \(who) from screen", #selector(hideVisitor)))
@@ -1165,9 +1169,9 @@ import AppKit
         bring.representedObject = f.code
         sub.addItem(bring)
         for (title, sel) in [
-          ("   🦴 Feed \(f.partnerName)", #selector(friendFeed(_:))),
+          ("   🍖 Feed \(f.partnerName)", #selector(friendFeed(_:))),
           ("   🎾 Play with \(f.partnerName)", #selector(friendPlay(_:))),
-          ("   🤚 Pet \(f.partnerName)", #selector(friendPet(_:))),
+          ("   ✋ Pet \(f.partnerName)", #selector(friendPet(_:))),
           ("   👉 Poke \(f.partnerName)", #selector(friendPoke(_:))),
           ("   💤 Tuck \(f.partnerName) in", #selector(friendNap(_:))),
         ] as [(String, Selector)] {
@@ -1199,7 +1203,7 @@ import AppKit
     }
     menu.addItem(item("My name…", #selector(onlineSetName)))
     menu.addItem(.separator())
-    menu.addItem(item("Quit \(petName)", #selector(quit)))
+    menu.addItem(item("Quit \(defaultPetName)", #selector(quit)))
   }
 
   private func item(_ title: String, _ action: Selector) -> NSMenuItem {

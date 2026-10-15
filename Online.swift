@@ -381,29 +381,30 @@ struct FriendBond: Codable, Equatable {
       let h = Self.num(json, "happiness") ?? 0
       let action = json["action"] as? String
       let from = (json["from"] as? String) ?? ""
+      // Own echoes (if any) must never rename bonds or rewrite lastActivity as "Me: pet".
       let fromMe = !from.isEmpty && from == displayName
+      if fromMe {
+        break
+      }
       if let code, let i = friends.firstIndex(where: { $0.code == code }) {
-        // Only adopt stats when the *friend* reports theirs — never overwrite with our echo.
-        if !fromMe {
-          friends[i].fullness = f
-          friends[i].happiness = h
-          friends[i].waiting = false
-          if let sp = json["species"] as? String, !sp.isEmpty {
-            friends[i].species = sp
-          }
-          if friends[i].partnerName == "waiting…", !from.isEmpty {
-            friends[i].partnerName = from
-          }
-          if let action {
-            friends[i].lastActivity = "\(from.isEmpty ? "friend" : from): \(action)"
-          }
-          saveFriends()
+        // Payload stats belong to `from` (the friend) — update their FriendBond only.
+        friends[i].fullness = f
+        friends[i].happiness = h
+        friends[i].waiting = false
+        if let sp = json["species"] as? String, !sp.isEmpty {
+          friends[i].species = sp
         }
+        // Never adopt `from` as partnerName except the initial waiting → bonded transition.
+        if friends[i].partnerName == "waiting…", !from.isEmpty {
+          friends[i].partnerName = from
+        }
+        if let action {
+          friends[i].lastActivity = "\(from.isEmpty ? "friend" : from): \(action)"
+        }
+        saveFriends()
       }
-      // Actions from a friend land on *your* dog; ignore our own echo.
-      if !fromMe {
-        onSync?(f, h, action, from)
-      }
+      // Actions from a friend land on *your* dog. Stats in the callback are ignored by Pet.
+      onSync?(f, h, action, from)
       onFriendsChanged?()
 
     case "system":
@@ -463,10 +464,12 @@ struct FriendBond: Codable, Equatable {
     let partnerSpecies = (json["partnerSpecies"] as? String) ?? Species.dog.rawValue
     let f = Self.num(json, "fullness")
     let h = Self.num(json, "happiness")
+    // Server now sends *partner* stats in room payloads (per-member). Safe to store on FriendBond
+    // only — never applied to your own dog.
 
     if let i = friends.firstIndex(where: { $0.code == code }) {
       friends[i].online = online
-      if let partner, !partner.isEmpty {
+      if let partner, !partner.isEmpty, partner != displayName {
         friends[i].partnerName = partner
         friends[i].waiting = false
       }
@@ -475,11 +478,16 @@ struct FriendBond: Codable, Equatable {
       }
       if let f { friends[i].fullness = f }
       if let h { friends[i].happiness = h }
-      friends[i].lastActivity = online ? "online now" : "offline"
+      // Don't clobber a fresh "you: pet" / "Linh: feed" line with "online now".
+      if friends[i].lastActivity == nil || friends[i].lastActivity == "offline"
+        || friends[i].lastActivity == "went offline" || friends[i].lastActivity == "online now"
+      {
+        friends[i].lastActivity = online ? "online now" : "offline"
+      }
     } else {
       friends.append(FriendBond(
         code: code,
-        partnerName: partner ?? "friend",
+        partnerName: (partner?.isEmpty == false && partner != displayName) ? partner! : "friend",
         online: online,
         waiting: partner == nil,
         fullness: f ?? 80,
@@ -491,12 +499,11 @@ struct FriendBond: Codable, Equatable {
     saveFriends()
 
     if code == activeCode {
-      if let partner, online {
+      if let partner, online, partner != displayName {
         onStatus?("🟢 \(partner) online")
       } else if let name = friends.first(where: { $0.code == code })?.partnerName {
         onStatus?(online ? "🟢 \(name) online" : "⚪️ \(name) offline")
       }
-      // Room stats are the friend's pet — stored on FriendBond above, not applied to your dog.
     }
     onPresence?()
     onFriendsChanged?()
@@ -510,11 +517,16 @@ struct FriendBond: Codable, Equatable {
     if let i = friends.firstIndex(where: { $0.code == code }) {
       let was = friends[i].online
       friends[i].online = online
-      if let partner, !partner.isEmpty {
+      // Presence `partner` is the other person — never overwrite with our own displayName.
+      if let partner, !partner.isEmpty, partner != displayName {
         friends[i].partnerName = partner
         friends[i].waiting = false
       }
-      friends[i].lastActivity = online ? "online now" : "went offline"
+      if friends[i].lastActivity == nil || friends[i].lastActivity == "offline"
+        || friends[i].lastActivity == "went offline" || friends[i].lastActivity == "online now"
+      {
+        friends[i].lastActivity = online ? "online now" : "went offline"
+      }
       saveFriends()
       if code == activeCode {
         onStatus?(online ? "🟢 \(friends[i].partnerName) online" : "⚪️ \(friends[i].partnerName) offline")

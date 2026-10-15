@@ -38,9 +38,13 @@ do
   px="${pair##*:}"
   /tmp/MochiMakeIcon "$ICONSET/$name" "$px"
   # iconutil rejects CGImage RGBA PNGs — flatten via JPEG → PNG (opaque).
-  sips -s format jpeg "$ICONSET/$name" --out "/tmp/MochiIcon-$name.jpg" >/dev/null
-  sips -s format png "/tmp/MochiIcon-$name.jpg" --out "$FLATSET/$name" >/dev/null
+  # Temp jpg must not contain "@" (sips / tooling treat it like an email).
+  flat_tmp="/tmp/MochiIcon-${px}.jpg"
+  sips -s format jpeg "$ICONSET/$name" --out "$flat_tmp" >/dev/null
+  sips -s format png "$flat_tmp" --out "$FLATSET/$name" >/dev/null
 done
+# Verify all 10 iconset slots exist before iconutil
+ls "$FLATSET" | wc -l | grep -q 10
 iconutil -c icns "$FLATSET" -o "$APP/Contents/Resources/AppIcon.icns"
 # Site favicon + og-ish icon (same dog)
 /tmp/MochiMakeIcon public/favicon.png 256

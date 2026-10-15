@@ -9,3 +9,7 @@ services:
     envVars:
       - key: PORT
         value: "10000"
+      # Optional: mount a Render Disk and point here so invites survive redeploys.
+      # Bonds still recover without this — each Mac re-attaches from its saved friend list.
+      # - key: MOCHI_DATA_DIR
+      #   value: /var/data

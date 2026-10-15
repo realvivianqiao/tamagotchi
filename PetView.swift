@@ -20,12 +20,7 @@ import AppKit
     let rect = CGRect(origin: spriteOrigin, size: spriteSize)
     ctx.saveGState()
     ctx.interpolationQuality = .none
-    if let spin = pet.rollRotation {
-      // Cat tumble roll
-      ctx.translateBy(x: rect.midX, y: rect.midY)
-      ctx.rotate(by: spin)
-      ctx.translateBy(x: -rect.midX, y: -rect.midY)
-    } else if pet.dir < 0 {
+    if pet.dir < 0 {
       ctx.translateBy(x: rect.midX, y: 0)
       ctx.scaleBy(x: -1, y: 1)
       ctx.translateBy(x: -rect.midX, y: 0)

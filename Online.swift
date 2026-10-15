@@ -331,10 +331,17 @@ struct FriendBond: Codable, Equatable {
     ensureSocket()
     Task { @MainActor in
       try? await Task.sleep(nanoseconds: 300_000_000)
-      send([
+      var msg: [String: Any] = [
         "type": "attach", "code": code, "name": displayName,
         "species": mySpecies.rawValue,
-      ])
+        "fullness": friends.first(where: { $0.code == code })?.fullness ?? 80,
+        "happiness": friends.first(where: { $0.code == code })?.happiness ?? 80,
+      ]
+      // Partner name lets the server rehydrate a wiped bond directory from client memory.
+      if let f = friends.first(where: { $0.code == code }), !f.waiting, !f.partnerName.isEmpty {
+        msg["partnerName"] = f.partnerName
+      }
+      send(msg)
     }
   }
 
@@ -424,7 +431,8 @@ struct FriendBond: Codable, Equatable {
     }
   }
 
-  /// After a server wipe: host re-posts the same invite code; guest is told to re-claim.
+  /// After a server wipe: recreate the invite/bond from *this Mac’s* saved friends list.
+  /// Bonds live on each device; the server is just a realtime relay.
   private func healMissingRoom(code: String) async {
     guard let i = friends.firstIndex(where: { $0.code == code }) else { return }
     if friends[i].waiting {
@@ -448,12 +456,28 @@ struct FriendBond: Codable, Equatable {
         onFriendsChanged?()
         onStatus?("couldn’t restore invite — Invite friend again")
       }
-    } else {
-      friends[i].online = false
-      friends[i].lastActivity = "server reset — re-claim their new code"
+      return
+    }
+    onStatus?("reconnecting bond \(code)…")
+    do {
+      _ = try await postJSON(path: "/api/restore", body: [
+        "name": displayName,
+        "code": code,
+        "partnerName": friends[i].partnerName,
+        "fullness": friends[i].fullness,
+        "happiness": friends[i].happiness,
+      ])
+      friends[i].lastActivity = "bond restored"
       saveFriends()
       onFriendsChanged?()
-      onStatus?("bond expired — ask \(friends[i].partnerName) for a fresh invite")
+      attach(code: code)
+      onStatus?("reconnected · \(friends[i].partnerName)")
+    } catch {
+      // Attach alone can still recreate the live room from the code.
+      attach(code: code)
+      friends[i].lastActivity = "retrying attach…"
+      saveFriends()
+      onFriendsChanged?()
     }
   }
 

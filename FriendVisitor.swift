@@ -108,16 +108,10 @@ import AppKit
     case .dog:
       set(.run, seconds: seconds)
       say("zoomies!!")
-    case .cat:
-      set(.roll, seconds: seconds)
-      say("tumble!!")
     case .bird:
       y = vf.minY + 60
       set(.fly, seconds: seconds)
       say("flyyy!")
-    case .cow:
-      set(.moo, seconds: min(seconds, 3))
-      say("MOO!!")
     case .octopus:
       y = vf.minY + 24
       set(.glide, seconds: seconds)
@@ -141,22 +135,22 @@ import AppKit
     let vf0 = NSScreen.main!.visibleFrame
     switch activity {
     case .walk:
-      x += dir * 1.6
+      x += dir * 0.9
       y = vf0.minY
-    case .run, .roll:
-      x += dir * (activity == .roll ? 3 : 4)
-      if Int.random(in: 0..<40) == 0 { dir = -dir }
+    case .run:
+      x += dir * 2.4
+      if Int.random(in: 0..<60) == 0 { dir = -dir }
       y = vf0.minY
     case .fly:
-      x += dir * 2.8
-      y = max(vf0.minY + 40, min(vf0.minY + 140, y + CGFloat(sin(Double(tick) / 8)) * 1.4))
+      x += dir * 1.5
+      y = max(vf0.minY + 40, min(vf0.minY + 140, y + CGFloat(sin(Double(tick) / 12)) * 0.9))
     case .glide:
-      x += dir * 1.2
-      y = vf0.minY + 18 + CGFloat(sin(Double(tick) / 14)) * 10
-    case .moo, .sit, .eat, .sleep, .held:
+      x += dir * 0.55
+      y = vf0.minY + 18 + CGFloat(sin(Double(tick) / 22)) * 8
+    case .sit, .eat, .sleep, .held:
       if activity != .sleep { y = vf0.minY }
     case .fall:
-      y = max(vf0.minY, y - 2)
+      y = max(vf0.minY, y - 1.5)
       if y <= vf0.minY {
         y = vf0.minY
         set(.sit, seconds: 2)
@@ -196,7 +190,7 @@ import AppKit
       }
     }
 
-    if tick % (activity == .run ? 3 : 7) == 0 { walkFrame ^= 1 }
+    if tick % (activity == .run || activity == .fly ? 5 : 10) == 0 { walkFrame ^= 1 }
     for i in particles.indices {
       particles[i].pos.x += particles[i].vel.dx
       particles[i].pos.y += particles[i].vel.dy
@@ -240,8 +234,7 @@ import AppKit
     var l = Look(species: species)
     switch activity {
     case .walk, .run, .fly: l.pose = .walk(walkFrame)
-    case .roll: l.pose = walkFrame == 0 ? .hang : .lie
-    case .glide, .moo, .sit, .eat: l.pose = .sit
+    case .glide, .sit, .eat: l.pose = .sit
     case .sleep: l.pose = .lie
     case .held, .fall: l.pose = .hang
     }

@@ -23,14 +23,12 @@ let palette: [Px: UInt32] = [
 ]
 
 enum Species: String, CaseIterable, Codable, Hashable {
-  case dog, cat, octopus, cow, bird
+  case dog, octopus, bird
 
   var title: String {
     switch self {
     case .dog: "Dog"
-    case .cat: "Black Cat"
     case .octopus: "Octopus"
-    case .cow: "Cow"
     case .bird: "Bird"
     }
   }
@@ -38,9 +36,7 @@ enum Species: String, CaseIterable, Codable, Hashable {
   var emoji: String {
     switch self {
     case .dog: "🐶"
-    case .cat: "🐈‍⬛"
     case .octopus: "🐙"
-    case .cow: "🐮"
     case .bird: "🐦"
     }
   }
@@ -48,7 +44,7 @@ enum Species: String, CaseIterable, Codable, Hashable {
   static func parse(_ raw: String?) -> Species {
     guard let raw, !raw.isEmpty else { return .dog }
     if let s = Species(rawValue: raw) { return s }
-    // old picker names → closest new default
+    // retired species → dog
     return .dog
   }
 }
@@ -139,12 +135,8 @@ enum Dog {
     switch look.species {
     case .dog:
       head = drawDog(&c, look)
-    case .cat:
-      head = drawBlackCat(&c, look)
     case .octopus:
       head = drawOctopus(&c, look)
-    case .cow:
-      head = drawCow(&c, look)
     case .bird:
       head = drawBird(&c, look)
     }
@@ -227,101 +219,6 @@ enum Dog {
     }
   }
 
-  // MARK: Black cat — one connected side-view silhouette (no floating head)
-
-  private static func drawBlackCat(_ c: inout Canvas, _ look: Look) -> (Int, Int) {
-    let phase = if case .walk(let p) = look.pose { p } else { 0 }
-    let wagUp = look.wag > 0
-
-    // Tail from the rear — always attached to body
-    func tail(bx: Double, by: Double) {
-      let tip = wagUp ? by - 5 : by - 1
-      for (i, p) in [(bx, by), (bx - 2.5, by - 1), (bx - 4.5, tip), (bx - 5.5, tip - 2)].enumerated() {
-        c.ellipse(p.0, p.1, 1.6, 1.6, i == 3 ? .pink : .black)
-      }
-    }
-
-    // Head glued to body. Tall pointed ears = “this is a cat”.
-    func catHead(hx: Double, hy: Double, tongue: Bool) -> (Int, Int) {
-      let ix = Int(hx.rounded()), iy = Int(hy.rounded())
-      // neck / cheek overlap into body
-      c.ellipse(hx - 2.5, hy + 2.5, 4.0, 3.5, .black)
-      // round head
-      c.ellipse(hx, hy, 5.5, 5.2, .black)
-      // BIG pointed ears (read as cat even at tiny size)
-      // left ear
-      c.rect(ix - 6, iy - 8, ix - 3, iy - 1, .black)
-      c[ix - 5, iy - 9] = .black
-      c[ix - 4, iy - 9] = .black
-      c.rect(ix - 5, iy - 6, ix - 4, iy - 2, .pink)
-      // right ear
-      c.rect(ix + 1, iy - 8, ix + 4, iy - 1, .black)
-      c[ix + 2, iy - 9] = .black
-      c[ix + 3, iy - 9] = .black
-      c.rect(ix + 2, iy - 6, ix + 3, iy - 2, .pink)
-      // soft gray face patch so features show on black fur
-      c.ellipse(hx + 2.5, hy + 0.5, 3.2, 3.0, .gray)
-      c.ellipse(hx + 3.5, hy + 1.5, 2.2, 1.8, .cream)
-      // nose + mouth
-      c.rect(ix + 5, iy, ix + 6, iy + 1, .pink)
-      if tongue { c.rect(ix + 4, iy + 3, ix + 5, iy + 5, .pink) }
-      // whiskers
-      c[ix + 6, iy + 2] = .white
-      c[ix + 7, iy + 1] = .white
-      c[ix + 7, iy + 3] = .white
-      c[ix + 6, iy + 4] = .white
-      // collar
-      c.rect(ix - 3, iy + 4, ix + 1, iy + 5, .red)
-      c[ix - 1, iy + 6] = .tag
-      // eyes land near (hx+1, hy-1)
-      return (ix - 24, iy - 8)
-    }
-
-    switch look.pose {
-    case .lie:
-      // sleeping loaf: long body, head tucked at the front, same height
-      tail(bx: 7, by: 19)
-      c.ellipse(16, 20, 10, 4.0, .black)
-      c.ellipse(16, 20.5, 5, 1.8, .gray)
-      c.rect(24, 22, 30, 23, .black) // front paws tucked
-      c.rect(24, 23, 25, 23, .pink)
-      c.rect(28, 23, 29, 23, .pink)
-      return catHead(hx: 28, hy: 16.5, tongue: look.tongue)
-
-    case .sit:
-      // classic sitting cat: haunch + upright chest + head on top
-      tail(bx: 8, by: 18)
-      c.ellipse(12, 19.5, 5.5, 4.5, .black) // haunch
-      c.ellipse(17, 17, 5.5, 5.5, .black) // torso — overlaps haunch
-      c.ellipse(17.5, 19, 3.2, 2.0, .gray)
-      c.rect(14, 22, 19, 23, .black)
-      c.rect(20, 18, 22, 23, .black) // front leg
-      c.rect(20, 23, 22, 23, .pink)
-      return catHead(hx: 24, hy: 11, tongue: look.tongue)
-
-    case .hang:
-      tail(bx: 8, by: 14)
-      c.ellipse(16, 15, 7, 5, .black)
-      c.rect(12, 18, 13, 25, .black)
-      c.rect(20, 18, 21, 25, .black)
-      return catHead(hx: 24, hy: 10, tongue: look.tongue)
-
-    case .walk:
-      tail(bx: 7, by: 14)
-      let bottom = 23
-      let legs = phase == 0 ? [10, 14, 20, 24] : [12, 13, 21, 23]
-      for x in legs {
-        c.rect(x, 16, x + 1, bottom, .black)
-        c.rect(x, bottom, x + 1, bottom, .pink)
-      }
-      c.ellipse(16, 15.5, 8, 4.5, .black)
-      c.ellipse(17, 17, 4, 1.6, .gray)
-      // chest fluff connecting into head
-      c.ellipse(22, 14, 3.5, 3.5, .black)
-      return catHead(hx: 26, hy: 10, tongue: look.tongue)
-    }
-  }
-
   // MARK: Octopus — soft blob + stubby tentacles + huge eyes
 
   private static func drawOctopus(_ c: inout Canvas, _ look: Look) -> (Int, Int) {
@@ -346,50 +243,6 @@ enum Dog {
     c[18, Int(headY) + 8] = .tag
     if look.tongue { c.rect(21, Int(headY) + 3, 22, Int(headY) + 5, .pink) }
     return (-4, Int(headY) - 8)
-  }
-
-  // MARK: Cow — soft spots, tiny horns, pink snout
-
-  private static func drawCow(_ c: inout Canvas, _ look: Look) -> (Int, Int) {
-    let sit = look.pose == .sit
-    let hang = look.pose == .hang
-    let phase = if case .walk(let p) = look.pose { p } else { 0 }
-    c.ellipse(6, sit ? 17 : 14, 2, 2, .white)
-    c.ellipse(4.5, sit ? 18.5 : 15.5, 1.5, 1.5, .pink) // fluffy tip
-    let bottom = hang ? 25 : 23
-    if look.pose == .lie {
-      c.ellipse(16, 20.5, 10, 4, .white)
-      c.ellipse(12, 19.5, 2.2, 1.8, .black)
-      c.ellipse(21, 18.5, 2, 1.8, .black)
-      c.rect(28, 23, 35, 24, .cream)
-    } else {
-      let legs = phase == 0 ? [9, 13, 20, 24] : [11, 12, 21, 23]
-      for x in legs {
-        c.rect(x, sit ? 17 : 16, x + 2, bottom, .black)
-        c.rect(x, bottom, x + 2, bottom, .pink)
-      }
-      c.ellipse(16, sit ? 16 : 15.5, 9, sit ? 5.5 : 5, .white)
-      c.ellipse(12, sit ? 14.5 : 13.5, 2.4, 2.2, .black)
-      c.ellipse(21, sit ? 13.5 : 13, 2.2, 2, .black)
-      c.ellipse(17, sit ? 18.5 : 17.5, 3.5, 1.8, .pink)
-    }
-    let head = sit ? (-3, -1) : (0, -1)
-    let (dx, dy) = (Double(head.0), Double(head.1))
-    c.ellipse(26 + dx, 8.5 + dy, 6.5, 6, .white) // bigger head
-    // tiny cute horns
-    c[21 + head.0, 3 + head.1] = .cream
-    c[22 + head.0, 4 + head.1] = .cream
-    c[30 + head.0, 3 + head.1] = .cream
-    c[29 + head.0, 4 + head.1] = .cream
-    c.ellipse(21 + dx, 8.5 + dy, 2, 1.6, .pink)
-    c.ellipse(31 + dx, 8.5 + dy, 2, 1.6, .pink)
-    c.ellipse(31.5 + dx, 11.5 + dy, 3.2, 2.4, .pink) // big soft snout
-    c.rect(32 + head.0, 11 + head.1, 33 + head.0, 12 + head.1, .black)
-    if look.tongue { c.rect(30 + head.0, 13 + head.1, 31 + head.0, 15 + head.1, .pink) }
-    c.rect(20 + head.0, 14 + head.1, 23 + head.0, 15 + head.1, .red)
-    c[21 + head.0, 16 + head.1] = .tag
-    c.ellipse(23.5 + dx, 7 + dy, 1.4, 1.4, .black) // forehead heart-ish spot
-    return head
   }
 
   // MARK: Bird — chibi chick, huge head, stubby body
@@ -442,8 +295,7 @@ enum Dog {
       switch species {
       case .octopus: return (20 + o.x, 7 + o.y)
       case .bird: return (23 + o.x, 6 + o.y)
-      case .cat: return (25 + o.x, 7 + o.y)
-      default: return (25 + o.x, 7 + o.y)
+      case .dog: return (25 + o.x, 7 + o.y)
       }
     }()
 

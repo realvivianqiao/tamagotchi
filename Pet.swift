@@ -3,7 +3,7 @@ import AppKit
 // MARK: - Pet brain
 
 @MainActor final class Pet: NSObject, NSMenuDelegate {
-  enum Activity { case walk, run, sit, sleep, eat, held, fall, roll, fly, glide, moo }
+  enum Activity { case walk, run, sit, sleep, eat, held, fall, fly, glide }
 
   let menu = NSMenu()
   private let window: NSPanel
@@ -192,39 +192,29 @@ import AppKit
         }
       }
       x += dir * walkSpeed
-      // Bird “hops” on the ground; cow barely shuffles; octopus prefers not to walk.
+      // Bird hops gently on the ground; octopus prefers not to walk.
       if species == .bird, activity == .walk {
-        y = vf.minY + (walkFrame == 0 ? 0 : 6)
+        y = vf.minY + (walkFrame == 0 ? 0 : 3)
       }
-    case .run: // dog chase / rare cat zoomies
-      x += dir * (species == .cat ? 6.5 : 5)
-      if Int.random(in: 0..<(species == .cat ? 25 : 50)) == 0 { dir = -dir }
+    case .run: // dog chase
+      x += dir * 3.0
+      if Int.random(in: 0..<70) == 0 { dir = -dir }
       y = vf.minY
-    case .roll: // cat belly-roll tumble
-      x += dir * 2.6
-      if Int.random(in: 0..<40) == 0 { dir = -dir }
-      y = vf.minY
-    case .fly: // bird soars between perch heights
-      x += dir * 3.2
-      let ceiling = vf.minY + min(200, vf.height * 0.55)
+    case .fly: // bird soars between perch heights (slow drift)
+      x += dir * 1.6
+      let ceiling = vf.minY + min(180, vf.height * 0.5)
       let perch = vf.minY + 55
-      y += CGFloat(sin(Double(tick) / 6.0)) * 2.0
-      if tick % 50 == 0 { y += CGFloat.random(in: -20...25) }
+      y += CGFloat(sin(Double(tick) / 10.0)) * 1.2
+      if tick % 80 == 0 { y += CGFloat.random(in: -12...16) }
       y = min(max(y, perch), ceiling)
-      if Int.random(in: 0..<45) == 0 { dir = -dir }
+      if Int.random(in: 0..<80) == 0 { dir = -dir }
     case .glide: // octopus drifts like it’s in water
-      x += dir * 0.9
-      y = vf.minY + 28 + CGFloat(sin(Double(tick) / 18.0)) * 14
-      if Int.random(in: 0..<100) == 0 { dir = -dir }
-      if tick % 55 == 0 { emit(["💧", "🫧"].randomElement()!) }
-    case .moo: // cow plants feet and hollers
-      y = vf.minY
-      if tick % 36 == 0 {
-        emit(["💬", "🌾"].randomElement()!)
-        say(["moo~", "MOO!", "mooo…", "*chew*"].randomElement()!)
-      }
+      x += dir * 0.5
+      y = vf.minY + 28 + CGFloat(sin(Double(tick) / 26.0)) * 10
+      if Int.random(in: 0..<140) == 0 { dir = -dir }
+      if tick % 70 == 0 { emit(["💧", "🫧"].randomElement()!) }
     case .fall:
-      vy -= species == .bird ? 0.7 : 1.1 // birds flutter-fall
+      vy -= species == .bird ? 0.55 : 0.9 // birds flutter-fall
       if species == .bird { vx *= 0.98 }
       x += vx
       y += vy
@@ -240,12 +230,7 @@ import AppKit
       break
     case .sit, .eat:
       y = restFloor(in: vf)
-      // cow chews; cat loafs (still); dog pants; bird pecks in place
-      if activity == .eat, tick % 12 == 0, species == .bird { emit("seed") }
-      if activity == .eat, tick % 20 == 0, species == .cow { emit("🌾") }
-      if activity == .sit, species == .cat, tick % 90 == 0, bubble == nil {
-        say(["mrrrp", "…", "loaf."].randomElement()!, seconds: 1.2)
-      }
+      if activity == .eat, tick % 16 == 0, species == .bird { emit("seed") }
     }
     guard activity != .held else { return }
 
@@ -288,7 +273,7 @@ import AppKit
     switch activity {
     case .fly, .glide, .held, .fall:
       return
-    case .sit, .eat, .moo:
+    case .sit, .eat:
       y = restFloor(in: vf)
     case .walk:
       if species == .octopus {
@@ -300,7 +285,7 @@ import AppKit
       } else {
         y = vf.minY
       }
-    case .run, .roll:
+    case .run:
       y = vf.minY
     default:
       break
@@ -309,17 +294,15 @@ import AppKit
 
   private var walkSpeed: CGFloat {
     switch species {
-    case .cow: return 0.85 // grazing shuffle
-    case .cat: return 1.6 // sneaky trot
-    case .bird: return 1.4 // hop-walk
-    case .octopus: return 0.6 // awkward on “land”
-    case .dog: return fullness < 20 ? 1.0 : 1.9
+    case .bird: return 0.75 // gentle hop-walk
+    case .octopus: return 0.4 // awkward on “land”
+    case .dog: return fullness < 20 ? 0.7 : 1.15
     }
   }
 
   private func animate() {
-    let flapFast = activity == .run || activity == .fly || activity == .roll
-    if tick % (flapFast ? 3 : 7) == 0 { walkFrame ^= 1 }
+    let flapFast = activity == .run || activity == .fly
+    if tick % (flapFast ? 5 : 10) == 0 { walkFrame ^= 1 }
     happyTicks = max(0, happyTicks - 1)
     angryTicks = max(0, angryTicks - 1)
     if blinkTicks > 0 { blinkTicks -= 1 } else if Int.random(in: 0..<150) == 0 { blinkTicks = 4 }
@@ -330,9 +313,8 @@ import AppKit
     if activity == .sleep && tick % 45 == 0 {
       emit(species == .bird ? "💤" : species == .octopus ? "🫧" : "💤")
     }
-    if activity == .fly && tick % 22 == 0 { emit(["🪶", "✨"].randomElement()!) }
-    if activity == .roll && tick % 18 == 0 { emit("🌀") }
-    if activity == .run && species == .dog && tick % 25 == 0 { emit("💨") }
+    if activity == .fly && tick % 32 == 0 { emit(["🪶", "✨"].randomElement()!) }
+    if activity == .run && species == .dog && tick % 35 == 0 { emit("💨") }
 
     if activity == .sleep && untilWoken {
       activityTicks = max(activityTicks, Int(60 * fps)) // keep ticking forever while napping
@@ -355,17 +337,15 @@ import AppKit
     let options: [(Activity, Int)] = speciesIdleOptions(sleepy: sleepy)
     var roll = Int.random(in: 0..<options.reduce(0) { $0 + $1.1 })
     let next = options.first { roll -= $0.1; return roll < 0 }!.0
-    if next == .walk || next == .roll || next == .fly || next == .glide, Bool.random() { dir = -dir }
+    if next == .walk || next == .fly || next == .glide, Bool.random() { dir = -dir }
     let seconds: ClosedRange<Double> =
       switch next {
-      case .walk: species == .cow ? 4...8 : 3...9
-      case .run: 2...4
-      case .roll: 2.5...5
-      case .fly: 4...9
-      case .glide: 4...8
-      case .moo: 2...3.5
+      case .walk: 4...10
+      case .run: 2.5...4.5
+      case .fly: 5...11
+      case .glide: 5...10
       case .sleep: 20...45
-      default: 2...6
+      default: 2.5...7
       }
     set(next, seconds: .random(in: seconds))
     // Settle into the right height for this mood.
@@ -377,16 +357,8 @@ import AppKit
     case .glide:
       y = restFloor(in: vf)
       if Bool.random() { say(["…", "bloop", "🫧"].randomElement()!) }
-    case .roll:
-      say(["nya~", "tumble!", "hehe"].randomElement()!)
-    case .moo:
-      say(["moo~", "*cud*", "🌾"].randomElement()!)
     case .run where species == .dog:
       if Bool.random() { say(["zoom!", "bark!", "🎾"].randomElement()!) }
-    case .run where species == .cat:
-      say(["ZOOMIES", "mrrp!!"].randomElement()!)
-    case .sit where species == .cat:
-      if Bool.random() { say("loaf.", seconds: 1.2) }
     default:
       break
     }
@@ -395,16 +367,9 @@ import AppKit
   private func speciesIdleOptions(sleepy: Bool) -> [(Activity, Int)] {
     switch species {
     case .dog: // loyal energy — walk + occasional sprint
-      return [(.walk, 48), (.sit, 18), (.sleep, sleepy ? 35 : 5), (.run, happiness > 55 ? 22 : 6)]
-    case .cat: // loaf a lot, sneak, rare roll, sudden zoomies
-      return [
-        (.sit, 40), (.sleep, sleepy ? 40 : 12), (.walk, 18),
-        (.roll, 8), (.run, happiness > 70 ? 10 : 2),
-      ]
-    case .cow: // chill grazer — almost never rushes
-      return [(.sit, 42), (.walk, 28), (.moo, 14), (.sleep, sleepy ? 35 : 10)]
+      return [(.walk, 48), (.sit, 22), (.sleep, sleepy ? 35 : 5), (.run, happiness > 55 ? 16 : 4)]
     case .bird: // lives in the air; ground is temporary
-      return [(.fly, 55), (.sit, 18), (.walk, 8), (.sleep, sleepy ? 25 : 4)]
+      return [(.fly, 48), (.sit, 24), (.walk, 10), (.sleep, sleepy ? 25 : 4)]
     case .octopus: // water creature — drift + rest, skip “walking”
       return [(.glide, 50), (.sit, 28), (.sleep, sleepy ? 22 : 6)]
     }
@@ -452,15 +417,13 @@ import AppKit
       let hi: String =
         switch species {
         case .dog: "hi! i'm \(petName) 🐶"
-        case .cat: "…oh. i'm \(petName) 🐈‍⬛"
-        case .cow: "moo. i'm \(petName) 🐮"
         case .bird: "chirp! \(petName) 🐦"
         case .octopus: "bloop — \(petName) 🐙"
         }
       say(hi, seconds: 4)
     } else if impact < -18 {
       happiness = max(0, happiness - 2)
-      say(species == .bird ? "eep!" : species == .cat ? "mrrp?!" : "ow!")
+      say(species == .bird ? "eep!" : "ow!")
     }
   }
 
@@ -474,14 +437,11 @@ import AppKit
   }
 
   private func chatter() {
-    // Cats talk less; birds & dogs more; cows rarely.
     let chance: Double =
       switch species {
-      case .cat: 0.35
-      case .cow: 0.3
       case .octopus: 0.4
-      case .bird: 0.75
-      case .dog: 0.65
+      case .bird: 0.7
+      case .dog: 0.6
       }
     guard tick % Int(75 * fps) == 0, activity != .sleep, bubble == nil, Double.random(in: 0..<1) < chance else { return }
     let hour = Calendar.current.component(.hour, from: Date())
@@ -492,31 +452,24 @@ import AppKit
       if hungry {
         switch species {
         case .dog: ["hungry… 🦴?", "ball AND food??"]
-        case .cat: ["…tuna.", "you may feed me"]
-        case .cow: ["grass please", "chew… empty"]
         case .bird: ["SEED", "berry??", "hungry chirp"]
         case .octopus: ["🦀?", "snack bloop"]
         }
       } else if sad {
         switch species {
         case .dog: ["play with me…", "pet me? 🥺"]
-        case .cat: ["ignoring you…", "…attention."]
-        case .cow: ["lonely moo", "pets?"]
         case .bird: ["lonely tweet", "sing with me?"]
         case .octopus: ["drift alone…", "🫧?"]
         }
       } else if night {
         switch species {
-        case .cat: ["night loaf 🌙"]
         case .bird: ["roost time"]
         case .octopus: ["dark water…"]
-        default: ["sleepy 🌙"]
+        case .dog: ["sleepy 🌙"]
         }
       } else {
         switch species {
         case .dog: ["woof!", "*sniff*", "walk??", "good day!"]
-        case .cat: ["mrrrp", "…", "loafing", "mine."]
-        case .cow: ["moo", "*chew*", "🌾", "…"]
         case .bird: ["chirp!", "tweet!", "♪", "up up!"]
         case .octopus: ["bloop", "…", "🫧", "ink later"]
         }
@@ -526,20 +479,13 @@ import AppKit
 
   // MARK: Rendering
 
-  /// Spin angle while the cat rolls (used by PetView).
-  var rollRotation: CGFloat? {
-    activity == .roll ? CGFloat(tick) * (.pi / 6) : nil
-  }
-
   private var look: Look {
     let angry = angryTicks > 0
     let happy = !angry && (happyTicks > 0 || activity == .eat || activity == .run || activity == .fly)
     var l = Look(species: species)
     switch activity {
     case .walk, .run, .fly: l.pose = .walk(walkFrame)
-    case .roll: l.pose = walkFrame == 0 ? .hang : .lie // tumble frames
-    case .glide: l.pose = .sit
-    case .moo, .sit, .eat: l.pose = .sit
+    case .glide, .sit, .eat: l.pose = .sit
     case .sleep: l.pose = .lie
     case .held, .fall: l.pose = .hang
     }
@@ -547,13 +493,13 @@ import AppKit
       l.eyes = .closed
     } else if angry {
       l.eyes = .angry
-    } else if happy || activity == .moo {
+    } else if happy {
       l.eyes = .happy
     } else {
       l.eyes = .open
     }
-    l.tongue = !angry && (activity == .eat || activity == .moo ? walkFrame == 0 : happy)
-    l.wag = activity == .sleep || angry ? 0 : tick / (happy || activity == .fly || activity == .glide ? 3 : 10) % 2
+    l.tongue = !angry && (activity == .eat ? walkFrame == 0 : happy)
+    l.wag = activity == .sleep || angry ? 0 : tick / (happy || activity == .fly || activity == .glide ? 4 : 12) % 2
     return l
   }
 
@@ -636,8 +582,6 @@ import AppKit
         let line: String =
           switch species {
           case .dog: ["put me down!", "wheee~"].randomElement()!
-          case .cat: ["unhand me", "I allowed this"].randomElement()!
-          case .cow: "moo?!"
           case .bird: "not a kite!!"
           case .octopus: "tentacles!!"
           }
@@ -666,7 +610,7 @@ import AppKit
     happiness = min(100, happiness + 6)
     happyTicks = Int(2.5 * fps)
     if activity == .sleep || untilWoken {
-      say(species == .cat ? "mrrp… 💤" : species == .cow ? "mmmoo…" : "mmh…? 🥱")
+      say("mmh…? 🥱")
       pushOnline()
       return
     }
@@ -675,29 +619,15 @@ import AppKit
       emit("❤️", count: 4)
       say(["woof!", "best day!!", "more pets!!"].randomElement()!)
       hop()
-    case .cat:
-      // Cats are choosy — sometimes loaf-purr, sometimes swat.
-      emit(Bool.random() ? "❤️" : "💢", count: 2)
-      if Double.random(in: 0..<1) < 0.55 {
-        say(["purr~", "mrrrp", "acceptable."].randomElement()!)
-        set(.sit, seconds: 3) // loaf into it
-      } else {
-        say(["touch grass", "hiss— joke", "my terms."].randomElement()!)
-        set(.roll, seconds: 2)
-      }
-    case .cow:
-      emit("❤️", count: 2)
-      say(["moo~", "*leans in*", "warm…"].randomElement()!)
-      set(.sit, seconds: 2.5)
     case .bird:
       emit("✨", count: 3)
       say(["tweet!", "fluff!!", "♪"].randomElement()!)
       y = restFloor(in: screenFrame()) + 10
-      set(.fly, seconds: 2) // happy flutter
+      set(.fly, seconds: 2.5) // happy flutter
     case .octopus:
       emit("🫧", count: 3)
       say(["bloop~", "pat pat", "🫧❤️"].randomElement()!)
-      set(.glide, seconds: 2.5)
+      set(.glide, seconds: 3)
     }
     pushOnline()
   }
@@ -707,21 +637,16 @@ import AppKit
     let wasFull = fullness >= 95
     fullness = min(100, fullness + 35)
     happiness = min(100, happiness + (wasFull ? 2 : 4))
-    let eatSec: Double = species == .cow ? 5 : species == .cat ? 2.5 : 3
-    set(.eat, seconds: eatSec)
+    set(.eat, seconds: 3.5)
     if wasFull {
       switch species {
       case .dog: say("still hungry?? ok… 🍖"); emit("🍖")
-      case .cat: say("…more? fine. 🐟"); emit("🐟")
-      case .cow: say("more grass?? 🌾"); emit("🌾", count: 2)
       case .bird: say("more seeds!!"); emit("seed", count: 2)
       case .octopus: say("second snack 🦀"); emit("🦀")
       }
     } else {
       switch species {
       case .dog: say("nom nom 🍖"); emit("🍖")
-      case .cat: say("…fine. 🐟"); emit("🐟")
-      case .cow: say("*chew chew* 🌾"); emit("🌾", count: 2)
       case .bird: say("peck peck!"); emit("seed", count: 2)
       case .octopus: say("nom bloop 🦀"); emit("🦀")
       }
@@ -732,7 +657,7 @@ import AppKit
   @objc private func play() {
     happiness = min(100, happiness + 12)
     fullness = max(0, fullness - 3)
-    startSignatureMove(seconds: 6)
+    startSignatureMove(seconds: 7)
     pushOnline()
   }
 
@@ -744,23 +669,10 @@ import AppKit
       set(.run, seconds: seconds)
       say("ZOOMIES!! 🎾")
       emit("💨")
-    case .cat:
-      // classic: sudden zoomies, then a dramatic roll
-      set(.run, seconds: seconds * 0.45)
-      DispatchQueue.main.asyncAfter(deadline: .now() + seconds * 0.45) { [weak self] in
-        guard let self, self.species == .cat else { return }
-        self.set(.roll, seconds: seconds * 0.55)
-        self.say("tumble!! 🌀")
-      }
-      say("mrrp ZOOM")
     case .bird:
       y = vf.minY + CGFloat.random(in: 80...140)
       set(.fly, seconds: seconds)
       say("sky!! 🪶")
-    case .cow:
-      set(.moo, seconds: min(seconds, 4))
-      say("MOOO!! 🌾")
-      emit("💬", count: 2)
     case .octopus:
       y = restFloor(in: vf) + 10
       set(.glide, seconds: seconds)
@@ -778,25 +690,17 @@ import AppKit
     let vf = screenFrame()
     switch species {
     case .dog:
-      set(.run, seconds: 2.5)
+      set(.run, seconds: 3)
       emit("💢", count: 3)
       say(["hey!!", "grrr!", "was that needed"].randomElement()!)
-    case .cat:
-      set(.run, seconds: 2) // offended sprint away
-      emit("💢", count: 2)
-      say(["HISS", "how dare", "unloved."].randomElement()!)
-    case .cow:
-      set(.moo, seconds: 2.5)
-      emit("💢", count: 2)
-      say(["MOO?!", "rude farmer"].randomElement()!)
     case .bird:
       y = vf.minY + 100
-      set(.fly, seconds: 3)
+      set(.fly, seconds: 3.5)
       emit("💢", count: 2)
       say(["SQUAWK", "mean!!"].randomElement()!)
     case .octopus:
       y = restFloor(in: vf)
-      set(.glide, seconds: 3)
+      set(.glide, seconds: 3.5)
       emit("🖤", count: 4) // ink cloud
       say(["INK!!", "blorp— bye"].randomElement()!)
     }
@@ -809,18 +713,14 @@ import AppKit
       y = restFloor(in: vf)
       set(.sit, seconds: 2)
       say(
-        species == .cat ? "big stretch…" :
-          species == .bird ? "morning chirp" :
-          species == .cow ? "moo…?" :
+        species == .bird ? "morning chirp" :
           species == .octopus ? "rise…" : "🥱")
     } else {
       untilWoken = true
       y = sleepFloor(in: vf)
       set(.sleep, seconds: 9_999)
       say(
-        species == .cat ? "loaf nap 💤" :
-          species == .bird ? "roost 💤" :
-          species == .cow ? "zzz moo" :
+        species == .bird ? "roost 💤" :
           species == .octopus ? "sand nap 🫧" : "zzz…")
     }
     pushOnline()

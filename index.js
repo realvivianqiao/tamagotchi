@@ -1,20 +1,30 @@
 import { WebSocketServer } from "ws";
 import { createServer } from "http";
-import { readFile, writeFile } from "fs/promises";
-import { join, extname } from "path";
+import { mkdir, readFile, writeFile } from "fs/promises";
+import { join, extname, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const PORT = Number(process.env.PORT || 3847);
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const staticRoots = [join(__dirname, "public"), __dirname];
-const STORE = "/tmp/mochi-invites.json";
-const ROOM_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+// Prefer a persistent disk (Render Disk → MOCHI_DATA_DIR). Fall back to /tmp (wiped on redeploy —
+// clients still recover because bonds live on each Mac and attach recreates rooms).
+const DATA_DIR = process.env.MOCHI_DATA_DIR || "/tmp";
+const STORE = join(DATA_DIR, "mochi-invites.json");
+const WAITING_TTL_MS = 7 * 24 * 60 * 60 * 1000; // unclaimed invite
+const BOND_TTL_MS = 90 * 24 * 60 * 60 * 1000; // claimed bond record
+const EMPTY_ROOM_TTL_MS = 2 * 60 * 60 * 1000;
 
-/** Live WS rooms */
+/** Live WS rooms (ephemeral — fine to lose; clients re-attach) */
 const rooms = new Map();
-/** Durable invites that survive deploys/restarts on this box */
-/** @type {Map<string, {hostName:string, guestName:?string, fullness:number, happiness:number, createdAt:number}>} */
+/** Invite / bond directory — best-effort durable on disk */
+/** @type {Map<string, {hostName:?string, guestName:?string, fullness:number, happiness:number, createdAt:number, bondedAt:?number}>} */
 const invites = new Map();
+
+const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+function isValidCode(c) {
+  return typeof c === "string" && c.length === 6 && [...c].every((ch) => CODE_ALPHABET.includes(ch));
+}
 
 const mime = {
   ".html": "text/html; charset=utf-8",
@@ -30,9 +40,8 @@ const mime = {
 };
 
 function code() {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let out = "";
-  for (let i = 0; i < 6; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  for (let i = 0; i < 6; i++) out += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
   return out;
 }
 
@@ -43,14 +52,24 @@ function uniqueCode() {
   return c;
 }
 
+function inviteAlive(inv, now = Date.now()) {
+  if (!inv) return false;
+  if (inv.guestName) {
+    const t = inv.bondedAt || inv.createdAt || 0;
+    return now - t < BOND_TTL_MS;
+  }
+  return now - (inv.createdAt || 0) < WAITING_TTL_MS;
+}
+
 async function loadInvites() {
   try {
+    await mkdir(dirname(STORE), { recursive: true });
     const raw = JSON.parse(await readFile(STORE, "utf8"));
     const now = Date.now();
     for (const [c, inv] of Object.entries(raw || {})) {
-      if (now - (inv.createdAt || 0) < ROOM_TTL_MS) invites.set(c, inv);
+      if (inviteAlive(inv, now)) invites.set(c, inv);
     }
-    console.log(`loaded ${invites.size} invites from disk`);
+    console.log(`loaded ${invites.size} invites from ${STORE}`);
   } catch {
     /* first boot */
   }
@@ -59,10 +78,29 @@ async function loadInvites() {
 async function saveInvites() {
   const obj = Object.fromEntries(invites);
   try {
-    await writeFile(STORE, JSON.stringify(obj));
+    await mkdir(dirname(STORE), { recursive: true });
+    await writeFile(STORE, JSON.stringify(obj, null, 0));
   } catch (e) {
     console.warn("save invites failed", e.message);
   }
+}
+
+/** Upsert a bond/invite record from client memory (source of truth after redeploys). */
+function upsertInvite(c, { hostName, guestName, fullness, happiness, preserveGuest = true }) {
+  const prev = invites.get(c);
+  const inv = {
+    hostName: hostName || prev?.hostName || null,
+    guestName: preserveGuest
+      ? guestName || prev?.guestName || null
+      : guestName ?? null,
+    fullness: Number.isFinite(fullness) ? fullness : prev?.fullness ?? 80,
+    happiness: Number.isFinite(happiness) ? happiness : prev?.happiness ?? 80,
+    createdAt: prev?.createdAt || Date.now(),
+    bondedAt: prev?.bondedAt || null,
+  };
+  if (inv.hostName && inv.guestName && !inv.bondedAt) inv.bondedAt = Date.now();
+  invites.set(c, inv);
+  return inv;
 }
 
 function ensureRoomMaps(room) {
@@ -112,25 +150,29 @@ function broadcast(room, msg, except = null) {
   }
 }
 
-function ensureRoom(code) {
+/**
+ * Live rooms are ephemeral. Knowing a valid 6-char code (stored on each Mac) is enough
+ * to recreate the room after a server wipe — bonds are client-owned.
+ */
+function ensureRoom(code, { createIfMissing = false } = {}) {
   let room = rooms.get(code);
   if (room) {
     ensureRoomMaps(room);
     return room;
   }
   const inv = invites.get(code);
-  if (!inv) return null;
+  if (!inv && !createIfMissing) return null;
   room = {
     code,
-    fullness: inv.fullness,
-    happiness: inv.happiness,
+    fullness: inv?.fullness ?? 80,
+    happiness: inv?.happiness ?? 80,
     updatedAt: Date.now(),
     emptySince: Date.now(),
     members: new Map(),
     species: new Map(),
     stats: new Map(),
   };
-  if (inv.hostName) {
+  if (inv?.hostName) {
     room.stats.set(inv.hostName, {
       fullness: inv.fullness,
       happiness: inv.happiness,
@@ -183,12 +225,12 @@ function leave(ws) {
 setInterval(() => {
   const now = Date.now();
   for (const [c, inv] of invites) {
-    if (now - inv.createdAt > ROOM_TTL_MS) invites.delete(c);
+    if (!inviteAlive(inv, now)) invites.delete(c);
   }
   for (const [c, room] of rooms) {
     if (room.members.size > 0) continue;
     const idle = room.emptySince || room.updatedAt || 0;
-    if (now - idle > ROOM_TTL_MS) rooms.delete(c);
+    if (now - idle > EMPTY_ROOM_TTL_MS) rooms.delete(c);
   }
   saveInvites();
 }, 60_000).unref?.();
@@ -247,50 +289,71 @@ const httpServer = createServer(async (req, res) => {
     return res.end();
   }
 
-  // Durable invite (survives WS drops + most restarts on same instance)
+  // Create / restore a waiting invite. Body.code reuses a known code (client heal).
   if (req.method === "POST" && url === "/api/invite") {
     const body = await readJson(req);
     const name = String(body.name || "friend").slice(0, 24);
-    // Optional: restore a known code after a Render redeploy wiped /tmp
     const wanted = String(body.code || "")
       .toUpperCase()
       .replace(/[^A-Z0-9]/g, "")
       .slice(0, 6);
-    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    const usable =
-      wanted.length === 6 && [...wanted].every((ch) => alphabet.includes(ch));
+    const usable = isValidCode(wanted);
     const c = usable ? wanted : uniqueCode();
-    const prev = invites.get(c);
-    // Restoring a known code (post-redeploy heal) clears the guest so they can re-claim.
-    const inv = {
+    const inv = upsertInvite(c, {
       hostName: name,
-      guestName: usable ? null : prev?.guestName || null,
-      fullness: Number.isFinite(body.fullness) ? body.fullness : prev?.fullness ?? 80,
-      happiness: Number.isFinite(body.happiness) ? body.happiness : prev?.happiness ?? 80,
-      createdAt: prev?.createdAt || Date.now(),
-    };
-    invites.set(c, inv);
-    // also warm a live room so WS attach is instant
-    if (!rooms.has(c)) {
-      const warm = {
-        code: c,
+      guestName: usable ? null : undefined,
+      fullness: body.fullness,
+      happiness: body.happiness,
+      preserveGuest: !usable,
+    });
+    if (usable) {
+      inv.guestName = null;
+      inv.bondedAt = null;
+    }
+    const room = ensureRoom(c, { createIfMissing: true });
+    if (room) {
+      room.stats.set(name, {
         fullness: inv.fullness,
         happiness: inv.happiness,
         updatedAt: Date.now(),
-        emptySince: Date.now(),
-        members: new Map(),
-        species: new Map(),
-        stats: new Map(),
-      };
-      warm.stats.set(name, {
-        fullness: inv.fullness,
-        happiness: inv.happiness,
-        updatedAt: inv.createdAt,
       });
-      rooms.set(c, warm);
     }
     await saveInvites();
     return json(res, 200, { code: c });
+  }
+
+  // Already-bonded clients rehydrate the server record after a wipe.
+  if (req.method === "POST" && url === "/api/restore") {
+    const body = await readJson(req);
+    const c = String(body.code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const name = String(body.name || "friend").slice(0, 24);
+    const partner = String(body.partnerName || "").slice(0, 24);
+    if (!isValidCode(c)) return json(res, 400, { error: "bad code" });
+    const prev = invites.get(c);
+    let hostName = prev?.hostName || name;
+    let guestName = prev?.guestName || null;
+    if (hostName === name) {
+      if (partner && partner !== name) guestName = partner;
+    } else {
+      guestName = name;
+      if (partner && partner !== name) hostName = partner;
+    }
+    const inv = upsertInvite(c, {
+      hostName,
+      guestName,
+      fullness: body.fullness,
+      happiness: body.happiness,
+      preserveGuest: true,
+    });
+    if (inv.hostName && inv.guestName) inv.bondedAt = inv.bondedAt || Date.now();
+    ensureRoom(c, { createIfMissing: true });
+    await saveInvites();
+    return json(res, 200, {
+      code: c,
+      hostName: inv.hostName,
+      guestName: inv.guestName,
+      restored: true,
+    });
   }
 
   if (req.method === "POST" && url === "/api/claim") {
@@ -300,31 +363,11 @@ const httpServer = createServer(async (req, res) => {
     const inv = invites.get(c);
     if (!inv) return json(res, 404, { error: "room not found", code: c });
     if (inv.guestName && inv.guestName !== name) {
-      // allow reclaim by same name; block third person
       return json(res, 409, { error: "room full", code: c });
     }
     inv.guestName = name;
-    // warm room so both can attach right after claim
-    if (!rooms.has(c)) {
-      const warm = {
-        code: c,
-        fullness: inv.fullness,
-        happiness: inv.happiness,
-        updatedAt: Date.now(),
-        emptySince: null,
-        members: new Map(),
-        species: new Map(),
-        stats: new Map(),
-      };
-      if (inv.hostName) {
-        warm.stats.set(inv.hostName, {
-          fullness: inv.fullness,
-          happiness: inv.happiness,
-          updatedAt: inv.createdAt,
-        });
-      }
-      rooms.set(c, warm);
-    }
+    inv.bondedAt = Date.now();
+    ensureRoom(c, { createIfMissing: true });
     await saveInvites();
     return json(res, 200, {
       code: c,
@@ -336,7 +379,12 @@ const httpServer = createServer(async (req, res) => {
   }
 
   if (req.method === "GET" && url === "/api/health") {
-    return json(res, 200, { ok: true, invites: invites.size, rooms: rooms.size });
+    return json(res, 200, {
+      ok: true,
+      invites: invites.size,
+      rooms: rooms.size,
+      store: STORE,
+    });
   }
 
   return serveStatic(req, res);
@@ -356,18 +404,30 @@ wss.on("connection", (ws) => {
       return send(ws, { type: "error", text: "bad json" });
     }
 
-    // Attach to a friend room (one socket can be in many rooms)
+    // Attach to a friend room (one socket can be in many rooms).
+    // Valid codes recreate rooms even after a wipe — bond lives on the client.
     if (msg.type === "attach" || msg.type === "join") {
       const c = String(msg.code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
       const name = String(msg.name || "friend").slice(0, 24);
       const species = String(msg.species || "dog").toLowerCase().slice(0, 12);
-      const room = ensureRoom(c);
+      const partnerName = String(msg.partnerName || "").slice(0, 24);
+      if (!isValidCode(c)) return send(ws, { type: "error", text: "bad code", code: c });
+      // Seed directory from client memory when the server forgot the bond.
+      if (!invites.has(c) || (partnerName && !invites.get(c)?.guestName)) {
+        upsertInvite(c, {
+          hostName: invites.get(c)?.hostName || name,
+          guestName: partnerName || invites.get(c)?.guestName || null,
+          fullness: Number.isFinite(msg.fullness) ? msg.fullness : undefined,
+          happiness: Number.isFinite(msg.happiness) ? msg.happiness : undefined,
+        });
+        saveInvites();
+      }
+      const room = ensureRoom(c, { createIfMissing: true });
       if (!room) return send(ws, { type: "error", text: "room not found", code: c });
       if (room.members.size >= 2 && ![...room.members.values()].includes(name)) {
         return send(ws, { type: "error", text: "already bonded (2 people max)", code: c });
       }
       ensureRoomMaps(room);
-      // replace existing socket for same name in THIS room only
       for (const [peer, n] of [...room.members]) {
         if (n === name && peer !== ws) {
           room.members.delete(peer);
@@ -382,7 +442,12 @@ wss.on("connection", (ws) => {
       ws.rooms.set(c, name);
       ws.room = room;
       const inv = invites.get(c);
-      if (inv && name !== inv.hostName) inv.guestName = name;
+      if (inv) {
+        if (!inv.hostName) inv.hostName = name;
+        else if (name !== inv.hostName) inv.guestName = name;
+        if (inv.hostName && inv.guestName) inv.bondedAt = inv.bondedAt || Date.now();
+        saveInvites();
+      }
       notifyRoom(room);
       return;
     }

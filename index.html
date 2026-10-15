@@ -3,193 +3,190 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Mochi — pixel pets for two</title>
+  <title>Mochi — cute desktop pets</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@500;600;700&family=Nunito:wght@500;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@450;550;650&family=Nunito:wght@600;700;800&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --ink: #1e2a24;
-      --leaf: #3d8b6e;
-      --leaf-dark: #2a634e;
-      --peach: #ffc6b0;
-      --blush: #ff8fa3;
-      --sky: #9ad7ff;
-      --cloud: #fff7fb;
-      --panel: #fff0f5;
-      --grass: #7bc47f;
-      --dirt: #c4a574;
+      --ink: #5a4a55;
+      --pink: #ff9eb5;
+      --pink-deep: #ff7a9a;
+      --peach: #ffe4ec;
+      --mint: #d9f5ea;
+      --lilac: #efe6ff;
+      --cream: #fff9fb;
+      --card: rgba(255, 255, 255, 0.72);
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; min-height: 100%; }
     body {
       font-family: Nunito, system-ui, sans-serif;
       color: var(--ink);
-      background-color: var(--sky);
-      background-image:
-        linear-gradient(180deg, #b8e4ff 0%, var(--sky) 38%, #b6e8c2 70%, var(--grass) 70%, var(--grass) 78%, var(--dirt) 78%);
-      overflow-x: hidden;
-    }
-    /* soft pixel clouds */
-    body::before {
-      content: "";
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
       background:
-        radial-gradient(circle at 12% 18%, rgba(255,255,255,.85) 0 28px, transparent 29px),
-        radial-gradient(circle at 16% 18%, rgba(255,255,255,.85) 0 36px, transparent 37px),
-        radial-gradient(circle at 22% 18%, rgba(255,255,255,.85) 0 24px, transparent 25px),
-        radial-gradient(circle at 78% 12%, rgba(255,255,255,.8) 0 22px, transparent 23px),
-        radial-gradient(circle at 82% 12%, rgba(255,255,255,.8) 0 30px, transparent 31px),
-        radial-gradient(circle at 88% 12%, rgba(255,255,255,.8) 0 18px, transparent 19px);
-      opacity: 0.9;
-      z-index: 0;
+        radial-gradient(circle at 18% 12%, #fff 0 6px, transparent 7px),
+        radial-gradient(circle at 72% 22%, #fff 0 4px, transparent 5px),
+        radial-gradient(circle at 40% 8%, #ffd6e4 0 90px, transparent 91px),
+        radial-gradient(circle at 88% 6%, #d6fff0 0 110px, transparent 111px),
+        radial-gradient(circle at 10% 70%, #efe6ff 0 120px, transparent 121px),
+        linear-gradient(165deg, #fff5f8 0%, #f3fff9 48%, #f7f0ff 100%);
+      min-height: 100vh;
     }
     main {
-      position: relative;
-      z-index: 1;
-      width: min(34rem, 100%);
+      width: min(26rem, 100%);
       margin: 0 auto;
-      padding: 6vh 1.1rem 3rem;
+      padding: 7vh 1.25rem 3rem;
       text-align: center;
     }
-    .stage {
-      position: relative;
-      margin: 0 auto 1rem;
-      width: min(100%, 28rem);
-      border: 4px solid var(--ink);
-      border-radius: 6px;
-      background: #dff3ff;
-      box-shadow: 4px 4px 0 var(--ink);
+    .hero {
+      width: min(15.5rem, 78vw);
+      margin: 0 auto 1.1rem;
+      aspect-ratio: 1;
+      border-radius: 50%;
       overflow: hidden;
-      image-rendering: pixelated;
+      background: linear-gradient(160deg, #fff, #ffe8f0);
+      box-shadow:
+        0 0 0 10px rgba(255, 158, 181, 0.18),
+        0 18px 40px rgba(255, 122, 154, 0.28);
+      animation: floaty 3.2s ease-in-out infinite;
     }
-    .stage img {
-      display: block;
+    .hero img {
       width: 100%;
-      height: auto;
-      image-rendering: auto;
-      transform-origin: 50% 80%;
-      animation: bounce 2.4s ease-in-out infinite;
+      height: 100%;
+      object-fit: cover;
+      display: block;
     }
-    @keyframes bounce {
+    @keyframes floaty {
       0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-4px); }
+      50% { transform: translateY(-8px); }
     }
-    .badges {
+    .pills {
       display: flex;
       justify-content: center;
-      gap: 0.45rem;
+      gap: 0.4rem;
       flex-wrap: wrap;
-      margin: 0.7rem 0 1.1rem;
+      margin-bottom: 1rem;
     }
-    .badge {
-      font-family: "Pixelify Sans", monospace;
-      font-size: 0.85rem;
-      background: var(--cloud);
-      border: 3px solid var(--ink);
-      padding: 0.2rem 0.55rem;
-      box-shadow: 2px 2px 0 var(--ink);
+    .pill {
+      font-size: 0.78rem;
+      font-weight: 800;
+      background: var(--card);
+      color: #c45d7a;
+      border-radius: 999px;
+      padding: 0.28rem 0.7rem;
+      backdrop-filter: blur(6px);
     }
     h1 {
-      font-family: "Pixelify Sans", monospace;
-      font-weight: 700;
-      font-size: clamp(3rem, 12vw, 4.5rem);
-      line-height: 0.95;
-      margin: 0 0 0.55rem;
-      letter-spacing: 0.02em;
-      text-shadow: 3px 3px 0 #fff, 5px 5px 0 rgba(30,42,36,.15);
+      font-family: Fredoka, system-ui, sans-serif;
+      font-weight: 650;
+      font-size: clamp(3.2rem, 14vw, 4.4rem);
+      margin: 0;
+      line-height: 1;
+      letter-spacing: 0.01em;
+      background: linear-gradient(120deg, #ff7a9a, #ffb4a2 55%, #8fd6c0);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .sparkle {
+      display: inline-block;
+      animation: twinkle 1.6s ease-in-out infinite;
+    }
+    @keyframes twinkle {
+      0%, 100% { transform: scale(1) rotate(0); opacity: 1; }
+      50% { transform: scale(1.15) rotate(8deg); opacity: 0.75; }
     }
     .lede {
       font-weight: 700;
       font-size: 1.05rem;
-      line-height: 1.4;
-      margin: 0 auto 1.35rem;
-      max-width: 26rem;
+      line-height: 1.45;
+      margin: 0.75rem auto 1.4rem;
+      max-width: 22rem;
+      color: #6e5a66;
     }
     .cta {
-      display: inline-block;
-      font-family: "Pixelify Sans", monospace;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      font-family: Fredoka, system-ui, sans-serif;
+      font-weight: 550;
       font-size: 1.15rem;
-      font-weight: 700;
       text-decoration: none;
-      color: #fff;
-      background: var(--blush);
-      border: 4px solid var(--ink);
-      padding: 0.85rem 1.35rem;
-      box-shadow: 4px 4px 0 var(--ink);
-      transition: transform 0.08s ease, box-shadow 0.08s ease;
+      color: white;
+      background: linear-gradient(135deg, var(--pink-deep), #ff9a7b);
+      padding: 0.95rem 1.55rem;
+      border-radius: 999px;
+      box-shadow: 0 12px 28px rgba(255, 122, 154, 0.4);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
     }
     .cta:hover {
-      transform: translate(2px, 2px);
-      box-shadow: 2px 2px 0 var(--ink);
-      background: #ff7a92;
-    }
-    .cta:active {
-      transform: translate(4px, 4px);
-      box-shadow: 0 0 0 var(--ink);
+      transform: translateY(-2px) scale(1.02);
+      box-shadow: 0 16px 32px rgba(255, 122, 154, 0.48);
     }
     .meta {
-      margin: 0.75rem 0 0;
-      font-size: 0.88rem;
+      margin: 0.8rem 0 0;
+      font-size: 0.84rem;
       font-weight: 700;
-      opacity: 0.75;
+      color: #9a8792;
     }
-    .panel {
-      margin: 1.75rem auto 0;
+    .card {
+      margin: 1.85rem auto 0;
       text-align: left;
-      background: var(--panel);
-      border: 4px solid var(--ink);
-      box-shadow: 4px 4px 0 var(--ink);
-      padding: 1rem 1rem 1rem 0.85rem;
+      background: var(--card);
+      backdrop-filter: blur(10px);
+      border-radius: 1.4rem;
+      padding: 1.15rem 1.2rem 1.2rem;
+      box-shadow: 0 10px 30px rgba(160, 120, 140, 0.12);
     }
-    .panel h2 {
-      font-family: "Pixelify Sans", monospace;
+    .card h2 {
+      font-family: Fredoka, system-ui, sans-serif;
+      font-weight: 550;
       font-size: 1.15rem;
-      margin: 0 0 0.65rem;
+      margin: 0 0 0.7rem;
       text-align: center;
+      color: #d46886;
     }
-    .panel ol {
+    .card ol {
       margin: 0;
-      padding-left: 1.35rem;
+      padding-left: 1.2rem;
       font-weight: 700;
       line-height: 1.55;
+      color: #6e5a66;
     }
-    .panel li { margin: 0.35rem 0; }
+    .card li { margin: 0.4rem 0; }
     footer {
-      margin-top: 1.75rem;
-      font-size: 0.8rem;
+      margin-top: 1.6rem;
+      font-size: 0.78rem;
       font-weight: 700;
-      opacity: 0.65;
+      color: #b39eaa;
     }
   </style>
 </head>
 <body>
   <main>
-    <div class="stage">
-      <img src="/pets.jpg" alt="Pixel dog, cat, and tiger" width="960" height="540" />
+    <div class="hero">
+      <img src="/pets.jpg" alt="Cute pixel dog, cat, and tiger" width="640" height="640" />
     </div>
-    <div class="badges">
-      <span class="badge">dogs</span>
-      <span class="badge">cats</span>
-      <span class="badge">tigers</span>
-      <span class="badge">&amp; friends</span>
+    <div class="pills">
+      <span class="pill">🐶 dogs</span>
+      <span class="pill">🐱 cats</span>
+      <span class="pill">🐯 tigers</span>
+      <span class="pill">💕 for two</span>
     </div>
-    <h1>MOCHI</h1>
-    <p class="lede">Tiny pixel pets that live on your Mac. Invite someone — when you feed or pet them, they see it happen on their screen.</p>
-    <a class="cta" href="/Mochi.zip">⬇ Download for Mac</a>
+    <h1>mochi <span class="sparkle">✧</span></h1>
+    <p class="lede">A tiny pet on your Mac. Invite someone you like — when you feed or cuddle them, they see it on their screen too.</p>
+    <a class="cta" href="/Mochi.zip">Download for Mac</a>
     <p class="meta">unzip → open Mochi.app · first time: right‑click → Open</p>
-    <section class="panel">
-      <h2>how to play</h2>
+    <section class="card">
+      <h2>how it works ♡</h2>
       <ol>
-        <li><strong>Download</strong> and open Mochi — you get a pet right away.</li>
+        <li><strong>Download</strong> & open — your pet shows up right away.</li>
         <li>Click the 🐶 menu → <strong>Invite partner…</strong></li>
-        <li>They download here → <strong>Claim invite…</strong> → paste your code.</li>
-        <li>Bonded! Feed / pet / play shows up for both of you.</li>
+        <li>They grab the app here → <strong>Claim invite…</strong> → paste your code.</li>
+        <li>You’re bonded. Feed, pet, play — they feel it live.</li>
       </ol>
     </section>
   </main>
-  <footer>free · may nap when idle · first wake can take a minute</footer>
+  <footer>free · might nap when idle · first wake can take a minute</footer>
 </body>
 </html>

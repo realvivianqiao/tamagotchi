@@ -66,10 +66,12 @@ async function saveInvites() {
 }
 
 function roomPayload(room, self) {
+  if (!room.species) room.species = new Map(); // displayName -> species
   const online = [...room.members.values()];
   const others = [...room.members.entries()]
     .filter(([ws]) => ws !== self)
     .map(([, name]) => name);
+  const partner = others[0] || null;
   return {
     type: "room",
     code: room.code,
@@ -77,7 +79,8 @@ function roomPayload(room, self) {
     happiness: room.happiness,
     updatedAt: room.updatedAt,
     you: room.members.get(self) || "",
-    partner: others[0] || null,
+    partner,
+    partnerSpecies: partner ? room.species.get(partner) || "dog" : null,
     partnerOnline: others.length > 0,
     online,
     members: online,
@@ -289,11 +292,13 @@ wss.on("connection", (ws) => {
     if (msg.type === "attach" || msg.type === "join") {
       const c = String(msg.code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
       const name = String(msg.name || "friend").slice(0, 24);
+      const species = String(msg.species || "dog").toLowerCase().slice(0, 12);
       const room = ensureRoom(c);
       if (!room) return send(ws, { type: "error", text: "room not found", code: c });
       if (room.members.size >= 2 && ![...room.members.values()].includes(name)) {
         return send(ws, { type: "error", text: "already bonded (2 people max)", code: c });
       }
+      if (!room.species) room.species = new Map();
       // replace existing socket for same name in THIS room only
       for (const [peer, n] of [...room.members]) {
         if (n === name && peer !== ws) {
@@ -303,6 +308,7 @@ wss.on("connection", (ws) => {
       }
       leaveRoom(ws, c);
       room.members.set(ws, name);
+      room.species.set(name, species);
       room.emptySince = null;
       room.updatedAt = Date.now();
       ws.rooms.set(c, name);
@@ -359,6 +365,11 @@ wss.on("connection", (ws) => {
         inv.fullness = room.fullness;
         inv.happiness = room.happiness;
       }
+      const fromName = room.members.get(ws) || "";
+      if (msg.species && fromName) {
+        if (!room.species) room.species = new Map();
+        room.species.set(fromName, String(msg.species).toLowerCase().slice(0, 12));
+      }
       broadcast(room, {
         type: "sync",
         code: room.code,
@@ -366,7 +377,8 @@ wss.on("connection", (ws) => {
         happiness: room.happiness,
         updatedAt: room.updatedAt,
         action: msg.action || null,
-        from: room.members.get(ws) || "",
+        from: fromName,
+        species: msg.species || (fromName && room.species?.get(fromName)) || null,
       });
       return;
     }

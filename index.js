@@ -234,9 +234,10 @@ const httpServer = createServer(async (req, res) => {
       wanted.length === 6 && [...wanted].every((ch) => alphabet.includes(ch));
     const c = usable ? wanted : uniqueCode();
     const prev = invites.get(c);
+    // Restoring a known code (post-redeploy heal) clears the guest so they can re-claim.
     const inv = {
       hostName: name,
-      guestName: prev?.guestName || null,
+      guestName: usable ? null : prev?.guestName || null,
       fullness: Number.isFinite(body.fullness) ? body.fullness : prev?.fullness ?? 80,
       happiness: Number.isFinite(body.happiness) ? body.happiness : prev?.happiness ?? 80,
       createdAt: prev?.createdAt || Date.now(),

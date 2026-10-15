@@ -5,11 +5,11 @@ import Foundation
 @MainActor final class Online: NSObject, URLSessionWebSocketDelegate {
   static let shared = Online()
 
-  /// Override with UserDefaults key `mochiServer`, e.g. `ws://192.168.1.20:3847`.
+  /// Live public server by default. Override with UserDefaults `mochiServer` if needed.
   var serverURL: URL {
     let raw = UserDefaults.standard.string(forKey: "mochiServer")?.trimmingCharacters(in: .whitespacesAndNewlines)
     if let raw, !raw.isEmpty, let url = URL(string: raw) { return url }
-    return URL(string: "ws://127.0.0.1:3847")!
+    return URL(string: "wss://tamagotchi-udtz.onrender.com")!
   }
 
   var displayName: String {

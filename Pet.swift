@@ -10,7 +10,6 @@ import AppKit
   private let view = PetView()
   private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
-  // Paws' ground point in screen coordinates.
   private var x: CGFloat
   private var y: CGFloat
   private var vx: CGFloat = 0, vy: CGFloat = 0
@@ -21,12 +20,7 @@ import AppKit
   private var tick = 0, walkFrame = 0, happyTicks = 0, blinkTicks = 0, bubbleTicks = 0
   private var greeted = false
 
-  private(set) var bubble: Bubble?
-  private var watcher: MarketWatcher!
-  private var book: MarketSnapshot?
-  private var alertQueue: [MarketAlert] = []
-  private var currentAlert: MarketAlert?
-  private var stealth = UserDefaults.standard.bool(forKey: "stealth")
+  private(set) var bubble: String?
   private(set) var particles: [Particle] = []
   private(set) var sprite = Dog.sprite(Look())
   private var sprites: [Look: Sprite] = [:]
@@ -45,7 +39,7 @@ import AppKit
   override init() {
     let screen = NSScreen.main!.visibleFrame
     x = screen.midX
-    y = screen.maxY - 40 // drops in from the top
+    y = screen.maxY - 40
     (fullness, happiness) = Self.loadStats()
     window = NSPanel(
       contentRect: CGRect(origin: .zero, size: windowSize), styleMask: [.borderless, .nonactivatingPanel],
@@ -58,7 +52,6 @@ import AppKit
     window.level = .floating
     window.hidesOnDeactivate = false
     window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
-    window.sharingType = .none // invisible to screen sharing, recordings and screenshots
     window.contentView = view
     view.pet = self
     window.orderFrontRegardless()
@@ -66,7 +59,6 @@ import AppKit
     statusItem.button?.title = "🐶"
     statusItem.menu = menu
     menu.delegate = self
-    watcher = MarketWatcher(feed: Self.savedFeed()) { [weak self] snapshot, fresh in self?.marketUpdate(snapshot, fresh) }
     wireOnline()
 
     let timer = Timer(timeInterval: 1 / fps, target: self, selector: #selector(step), userInfo: nil, repeats: true)
@@ -89,14 +81,22 @@ import AppKit
       if let partner = Online.shared.partner { self.petName = partner }
       if let action {
         self.playRemote(action)
-        if !from.isEmpty { self.say("\(from) → \(action)", seconds: 2) }
+        let who = from.isEmpty ? "partner" : from
+        let line: String =
+          switch action {
+          case "feed": "\(who) fed you! 🦴"
+          case "play": "\(who) wants to play! 🎾"
+          case "pet": "\(who) pet you! ❤️"
+          case "nap": "\(who) tucked you in 💤"
+          default: "\(who) → \(action)"
+          }
+        self.say(line, seconds: 2.5)
       }
       self.applyingRemote = false
       self.save()
     }
   }
 
-  /// Visual-only: stats already came from the server.
   private func playRemote(_ action: String) {
     switch action {
     case "feed":
@@ -107,8 +107,7 @@ import AppKit
     case "pet":
       happyTicks = Int(2 * fps)
       emit("❤️", count: 3)
-      targetX = nil
-      startFall(vx: 0, vy: 7)
+      hop()
     case "nap":
       set(.sleep, seconds: 40)
     default:
@@ -129,7 +128,6 @@ import AppKit
     move(in: screenFrame())
     animate()
     updateParticles()
-    showNextAlert()
     chatter()
     render()
   }
@@ -145,7 +143,7 @@ import AppKit
           set(.sit, seconds: 3)
         }
       }
-      x += dir * (fullness < 20 || bookIsDown ? 1.0 : 1.8)
+      x += dir * (fullness < 20 ? 1.0 : 1.8)
     case .run:
       x += dir * 5
       if Int.random(in: 0..<50) == 0 { dir = -dir }
@@ -184,16 +182,9 @@ import AppKit
     if blinkTicks > 0 { blinkTicks -= 1 } else if Int.random(in: 0..<150) == 0 { blinkTicks = 4 }
     if bubbleTicks > 0 {
       bubbleTicks -= 1
-      if bubbleTicks == 0 {
-        bubble = nil
-        currentAlert = nil
-      }
+      if bubbleTicks == 0 { bubble = nil }
     }
     if activity == .sleep && tick % 45 == 0 { emit("💤") }
-    if currentAlert?.level == .urgent, tick % 75 == 0, ![.held, .fall].contains(activity) {
-      hop() // keeps barking until you click it
-      emit("❗")
-    }
 
     activityTicks -= 1
     guard activityTicks <= 0, activity != .held, activity != .fall else { return }
@@ -208,8 +199,7 @@ import AppKit
   private func chooseNext() {
     let hour = Calendar.current.component(.hour, from: Date())
     let sleepy = hour >= 23 || hour < 7 || fullness < 15
-    let zoomies = happiness > 70 || (book?.pnlBps ?? 0) > 50
-    let options: [(Activity, Int)] = [(.walk, 50), (.sit, 25), (.sleep, sleepy ? 40 : 6), (.run, zoomies ? 8 : 2)]
+    let options: [(Activity, Int)] = [(.walk, 50), (.sit, 25), (.sleep, sleepy ? 40 : 6), (.run, happiness > 70 ? 8 : 2)]
     var roll = Int.random(in: 0..<options.reduce(0) { $0 + $1.1 })
     let next = options.first { roll -= $0.1; return roll < 0 }!.0
     if next == .walk, Bool.random() { dir = -dir }
@@ -245,16 +235,16 @@ import AppKit
     set(.sit, seconds: happyTicks > 0 ? 1.5 : 1)
     if !greeted {
       greeted = true
-      say("汪! 我是\(petName) 🐾", seconds: 4)
+      say("hi! i'm \(petName) 🐾", seconds: 4)
     } else if impact < -18 {
       happiness = max(0, happiness - 2)
-      say("哎哟!")
+      say("ow!")
     }
   }
 
   private func decay() {
-    fullness = max(0, fullness - 1 / (180 * fps)) // −1 every 3 min
-    happiness = max(0, happiness - 1 / (120 * fps)) // −1 every 2 min
+    fullness = max(0, fullness - 1 / (180 * fps))
+    happiness = max(0, happiness - 1 / (120 * fps))
     if tick % Int(30 * fps) == 0 {
       save()
       pushOnline()
@@ -263,45 +253,13 @@ import AppKit
 
   private func chatter() {
     guard tick % Int(75 * fps) == 0, activity != .sleep, bubble == nil, Double.random(in: 0..<1) < 0.6 else { return }
-    if let bps = book?.pnlBps, Bool.random() {
-      return say(stealth ? (bps >= 0 ? "📈 good day so far" : "📉 rough day… 🫂") : "Book \(signed(bps))bp today \(bps >= 0 ? "📈" : "📉")")
-    }
     let hour = Calendar.current.component(.hour, from: Date())
     let lines =
-      fullness < 30 ? ["饿了… 🦴?", "feed me pls 🥺", "肚子咕咕叫"]
-      : happiness < 30 ? ["陪我玩嘛…", "pet me?", "好无聊…"]
-      : hour >= 23 || hour < 6 ? ["该睡觉啦 🌙", "还不睡吗…"]
-      : ["汪!", "woof", "*sniff sniff*", "今天也要加油哦 ☀️", "摸鱼中…", "🎾?"]
+      fullness < 30 ? ["hungry… 🦴?", "feed me pls 🥺"]
+      : happiness < 30 ? ["play with me…", "pet me?"]
+      : hour >= 23 || hour < 6 ? ["sleepy 🌙"]
+      : ["woof!", "*sniff sniff*", "bored… 🎾?"]
     say(lines.randomElement()!)
-  }
-
-  // MARK: Market
-
-  private var bookIsDown: Bool { (book?.pnlBps ?? 0) < -15 }
-  private var bookIsUp: Bool { (book?.pnlBps ?? 0) > 15 }
-
-  private func marketUpdate(_ snapshot: MarketSnapshot, _ fresh: [MarketAlert]) {
-    book = snapshot
-    alertQueue = Array((alertQueue + fresh).sorted { $0.level > $1.level }.prefix(5)) // never build a backlog
-  }
-
-  private func showNextAlert() {
-    guard currentAlert == nil, activity != .held, !alertQueue.isEmpty else { return }
-    let alert = alertQueue.removeFirst()
-    currentAlert = alert
-    bubble = Bubble(text: stealth ? alert.stealthText : alert.text, level: alert.level)
-    bubbleTicks = alert.level == .urgent ? .max : Int((alert.level == .warn ? 10 : 6) * fps)
-    if activity == .sleep { set(.sit, seconds: 3) }
-    if alert.level >= .warn {
-      hop()
-      emit(alert.level == .urgent ? "❗" : "👀")
-    }
-  }
-
-  private func dismissAlert() {
-    currentAlert = nil
-    bubble = nil
-    bubbleTicks = 0
   }
 
   // MARK: Rendering
@@ -317,11 +275,7 @@ import AppKit
     }
     l.eyes = activity == .sleep || blinkTicks > 0 ? .closed : happy ? .happy : .open
     l.tongue = activity == .eat ? walkFrame == 0 : happy
-    l.wag = activity == .sleep ? 0 : tick / (happy || bookIsUp ? 3 : 10) % 2
-    if bookIsDown && !happy && activity != .sleep {
-      if l.eyes == .open { l.eyes = .sad }
-      l.wag = -1 // tail down
-    }
+    l.wag = activity == .sleep ? 0 : tick / (happy ? 3 : 10) % 2
     return l
   }
 
@@ -339,7 +293,6 @@ import AppKit
     view.needsDisplay = true
   }
 
-  /// Pixel-accurate hit test so clicks on the empty parts of the window reach the apps underneath.
   private func isOverDog(_ m: CGPoint) -> Bool {
     let lx = m.x - window.frame.minX - spriteOrigin.x, ly = m.y - window.frame.minY - spriteOrigin.y
     var col = Int((lx / scale).rounded(.down))
@@ -348,7 +301,6 @@ import AppKit
     return Canvas.contains(col, row) && sprite.canvas[col, row] != nil
   }
 
-  /// Top of the head, in view coordinates.
   var headPoint: CGPoint {
     let col = 25.5 + CGFloat(sprite.head.x), row = 3 + CGFloat(sprite.head.y)
     let mirrored = dir < 0 ? CGFloat(Canvas.w) - col : col
@@ -356,8 +308,7 @@ import AppKit
   }
 
   private func say(_ text: String, seconds: Double = 2.5) {
-    guard currentAlert == nil else { return } // alerts win over chit-chat
-    bubble = Bubble(text: text)
+    bubble = text
     bubbleTicks = Int(seconds * fps)
   }
 
@@ -403,7 +354,7 @@ import AppKit
       dragged = true
       targetX = nil
       activity = .held
-      if Bool.random() { say(["放我下来!", "wheee~", "去哪儿呀?"].randomElement()!) }
+      if Bool.random() { say(["put me down!", "wheee~"].randomElement()!) }
     }
     throwVelocity = CGVector(dx: (m.x - lastMouse.x) * 1.5, dy: (m.y - lastMouse.y) * 1.5)
     lastMouse = m
@@ -424,20 +375,16 @@ import AppKit
   // MARK: Actions
 
   private func pet() {
-    if currentAlert != nil {
-      dismissAlert()
-      return hop()
-    }
     happiness = min(100, happiness + 6)
     happyTicks = Int(2 * fps)
     emit("❤️", count: 3)
-    say(activity == .sleep ? "唔…? 🥱" : ["汪!", "woof!", "嘿嘿~", "more pets pls", "❤️"].randomElement()!)
+    say(activity == .sleep ? "mmh…? 🥱" : ["woof!", "hehe~", "more pets", "❤️"].randomElement()!)
     hop()
     pushOnline(action: "pet")
   }
 
   @objc private func feed() {
-    guard fullness < 95 else { return say("吃不下啦~ 😵") }
+    guard fullness < 95 else { return say("too full~ 😵") }
     fullness = min(100, fullness + 35)
     happiness = min(100, happiness + 4)
     set(.eat, seconds: 3)
@@ -458,7 +405,7 @@ import AppKit
     let vf = screenFrame(), margin = spriteSize.width / 2 - 16
     targetX = min(max(NSEvent.mouseLocation.x, vf.minX + margin), vf.maxX - margin)
     set(.walk, seconds: 60)
-    say("来啦!")
+    say("coming!")
   }
 
   @objc private func toggleNap() {
@@ -479,50 +426,56 @@ import AppKit
     NSApp.terminate(nil)
   }
 
-  // MARK: Online menu
+  // MARK: Online — invite / claim
 
-  @objc private func onlineCreate() {
+  @objc private func onlineInvite() {
     ensureDisplayName()
     Online.shared.create(fullness: fullness, happiness: happiness)
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
-      guard let code = Online.shared.code else {
-        self?.alert("Couldn’t create room. Start the server first:\ncd server && npm start")
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+      guard let self, let code = Online.shared.code else {
+        self?.alert("Couldn’t reach the server.\nCheck your internet and try again.")
         return
       }
+      let site = "https://tamagotchi-udtz.onrender.com"
+      let msg = """
+      be my desktop pet 🐶
+
+      1. download Mochi: \(site)
+      2. open it → 🐶 menu → Claim invite
+      3. code: \(code)
+      """
       NSPasteboard.general.clearContents()
-      NSPasteboard.general.setString(code, forType: .string)
-      self?.alert("Bond code \(code) copied.\nPartner: Online → Join partner…")
+      NSPasteboard.general.setString(msg, forType: .string)
+      self.onlineNote = "waiting · code \(code)"
+      self.alert("Invite copied — paste it to your partner (iMessage / Slack / whatever).\n\nCode: \(code)")
     }
   }
 
-  @objc private func onlineJoin() {
+  @objc private func onlineClaim() {
     ensureDisplayName()
-    let code = prompt("Join partner", message: "Paste their bond code", placeholder: "ABC123")
+    let code = prompt("Claim invite", message: "Paste the code from your partner", placeholder: "")
     guard let code, !code.isEmpty else { return }
-    Online.shared.join(code: code)
+    // Allow pasting the whole invite message — pull out a 6-char code.
+    let cleaned = code.uppercased()
+    let token =
+      cleaned.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+      .map(String.init)
+      .first { $0.count == 6 } ?? cleaned.replacingOccurrences(of: " ", with: "")
+    Online.shared.join(code: token)
   }
 
   @objc private func onlineLeave() {
     Online.shared.disconnect()
     petName = defaultPetName
-    onlineNote = "offline"
+    onlineNote = nil
     say("bye bye…")
   }
 
   @objc private func onlineSetName() {
-    if let name = prompt("Your name", message: "Shown to your partner (you become their pet)", placeholder: Online.shared.displayName),
+    if let name = prompt("Your name", message: "Your partner’s pet will be named after you", placeholder: Online.shared.displayName),
        !name.isEmpty
     {
       Online.shared.displayName = name
-    }
-  }
-
-  @objc private func onlineSetServer() {
-    let current = UserDefaults.standard.string(forKey: "mochiServer") ?? "ws://127.0.0.1:3847"
-    if let url = prompt("Mochi server", message: "Same WebSocket URL for both of you", placeholder: current),
-       !url.isEmpty
-    {
-      UserDefaults.standard.set(url, forKey: "mochiServer")
     }
   }
 
@@ -538,8 +491,9 @@ import AppKit
     alert.informativeText = message
     alert.addButton(withTitle: "OK")
     alert.addButton(withTitle: "Cancel")
-    let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+    let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
     field.stringValue = placeholder
+    field.placeholderString = "paste here"
     alert.accessoryView = field
     NSApp.activate(ignoringOtherApps: true)
     guard alert.runModal() == .alertFirstButtonReturn else { return nil }
@@ -561,30 +515,19 @@ import AppKit
     menu.addItem(info("💛 Happiness  \(bar(happiness))"))
     if let note = onlineNote { menu.addItem(info("🔗 \(note)")) }
     menu.addItem(.separator())
-    menu.addItem(info(bookLine))
-    if let error = watcher.lastError { menu.addItem(info("⚠️ \(error)")) }
-    menu.addItem(toggle("🔔 Market alerts", on: watcher.enabled, #selector(toggleAlerts)))
-    menu.addItem(toggle("🕶 Stealth mode (no numbers)", on: stealth, #selector(toggleStealth)))
-    menu.addItem(info("📡 Data: \(watcher.feed.name)"))
-    menu.addItem(.separator())
     menu.addItem(item("🦴 Feed", #selector(feed)))
     menu.addItem(item("🎾 Play", #selector(play)))
     menu.addItem(item("🤚 Pet", #selector(petFromMenu)))
     menu.addItem(item("📍 Come here", #selector(comeHere)))
     menu.addItem(item(activity == .sleep ? "☀️ Wake up" : "💤 Nap", #selector(toggleNap)))
     menu.addItem(.separator())
-    let online = NSMenuItem(title: "Online", action: nil, keyEquivalent: "")
-    let sub = NSMenu()
-    sub.addItem(item("Create bond (claim partner)", #selector(onlineCreate)))
-    sub.addItem(item("Join partner…", #selector(onlineJoin)))
-    if Online.shared.isBonded {
-      sub.addItem(item("Leave bond", #selector(onlineLeave)))
+    if Online.shared.isBonded, Online.shared.partner != nil {
+      menu.addItem(item("Leave bond", #selector(onlineLeave)))
+    } else {
+      menu.addItem(item("Invite partner…", #selector(onlineInvite)))
+      menu.addItem(item("Claim invite…", #selector(onlineClaim)))
     }
-    sub.addItem(.separator())
-    sub.addItem(item("Set my name…", #selector(onlineSetName)))
-    sub.addItem(item("Set server URL…", #selector(onlineSetServer)))
-    online.submenu = sub
-    menu.addItem(online)
+    menu.addItem(item("My name…", #selector(onlineSetName)))
     menu.addItem(.separator())
     menu.addItem(item("Quit \(petName)", #selector(quit)))
   }
@@ -592,33 +535,6 @@ import AppKit
   private func item(_ title: String, _ action: Selector) -> NSMenuItem {
     let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
     item.target = self
-    return item
-  }
-
-  private var bookLine: String {
-    guard let bps = book?.pnlBps else { return "📊 Book: waiting for data…" }
-    if stealth { return "📊 Book: \(bps >= 0 ? "up" : "down") today" }
-    let usd = book?.pnlUSD.map { "  (\(signed($0 / 1e6))M)" } ?? ""
-    return "📊 Book today: \(signed(bps))bp\(usd)"
-  }
-
-  private static func savedFeed() -> MarketFeed { DemoFeed() }
-
-  @objc private func toggleAlerts() {
-    watcher.enabled.toggle()
-    alertQueue.removeAll()
-    dismissAlert()
-  }
-
-  @objc private func toggleStealth() {
-    stealth.toggle()
-    UserDefaults.standard.set(stealth, forKey: "stealth")
-    if let alert = currentAlert { bubble = Bubble(text: stealth ? alert.stealthText : alert.text, level: alert.level) }
-  }
-
-  private func toggle(_ title: String, on: Bool, _ action: Selector) -> NSMenuItem {
-    let item = item(title, action)
-    item.state = on ? .on : .off
     return item
   }
 
@@ -642,7 +558,6 @@ import AppKit
     d.set(Date().timeIntervalSince1970, forKey: "savedAt")
   }
 
-  /// Stats keep draining while the app is closed (gently, with floors), like a real QQ pet.
   private static func loadStats() -> (Double, Double) {
     let d = UserDefaults.standard
     guard let savedAt = d.object(forKey: "savedAt") as? Double else { return (80, 80) }
@@ -653,4 +568,3 @@ import AppKit
     )
   }
 }
-

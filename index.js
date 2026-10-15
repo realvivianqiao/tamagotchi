@@ -6,7 +6,8 @@ import { fileURLToPath } from "url";
 
 const PORT = Number(process.env.PORT || 3847);
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
-const publicDir = join(__dirname, "public");
+// Prefer public/, but also serve from repo root (GitHub web uploads often flatten folders).
+const staticRoots = [join(__dirname, "public"), __dirname];
 
 /** @typedef {{ code: string, fullness: number, happiness: number, updatedAt: number, members: Map<any, string> }} Room */
 /** @type {Map<string, Room>} */
@@ -77,27 +78,28 @@ function leave(ws) {
 }
 
 async function serveStatic(req, res) {
-  try {
-    let path = (req.url || "/").split("?")[0];
-    if (path === "/") path = "/index.html";
-    // no path traversal
-    const safe = join(publicDir, path.replace(/^\/+/, ""));
-    if (!safe.startsWith(publicDir)) {
-      res.writeHead(400);
-      return res.end("bad path");
+  let path = (req.url || "/").split("?")[0];
+  if (path === "/") path = "/index.html";
+  const rel = path.replace(/^\/+/, "");
+
+  for (const root of staticRoots) {
+    const safe = join(root, rel);
+    if (!safe.startsWith(root)) continue;
+    try {
+      const data = await readFile(safe);
+      const type = mime[extname(safe)] || "application/octet-stream";
+      const headers = { "content-type": type };
+      if (extname(safe) === ".zip") {
+        headers["content-disposition"] = 'attachment; filename="Mochi.zip"';
+      }
+      res.writeHead(200, headers);
+      return res.end(data);
+    } catch {
+      // try next root
     }
-    const data = await readFile(safe);
-    const type = mime[extname(safe)] || "application/octet-stream";
-    const headers = { "content-type": type };
-    if (extname(safe) === ".zip") {
-      headers["content-disposition"] = 'attachment; filename="Mochi.zip"';
-    }
-    res.writeHead(200, headers);
-    res.end(data);
-  } catch {
-    res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
-    res.end("not found\n");
   }
+  res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+  res.end("not found\n");
 }
 
 const httpServer = createServer((req, res) => {

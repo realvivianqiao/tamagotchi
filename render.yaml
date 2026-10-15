@@ -1,0 +1,12 @@
+# Deploy: https://dashboard.render.com → New → Blueprint → this repo/folder
+services:
+  - type: web
+    name: mochi
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node index.js
+    healthCheckPath: /
+    envVars:
+      - key: PORT
+        value: "10000"

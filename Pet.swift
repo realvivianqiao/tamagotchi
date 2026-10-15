@@ -30,6 +30,9 @@ import AppKit
   private var petName = defaultPetName
   private var applyingRemote = false
   private var onlineNote: String?
+  private var hidden = false
+  /// User (or partner) put them to sleep — stay asleep until Wake up.
+  private var untilWoken = false
 
   private var grabStart = CGPoint.zero, lastMouse = CGPoint.zero, grabOffset = CGPoint.zero
   private var lastDragTime: TimeInterval = 0
@@ -65,13 +68,28 @@ import AppKit
     RunLoop.main.add(timer, forMode: .common)
   }
 
+  private var partnerWasOnline = false
+
   private func wireOnline() {
     Online.shared.onStatus = { [weak self] text in
       self?.onlineNote = text
-      if text.hasPrefix("bonded with"), let partner = Online.shared.partner {
-        self?.petName = partner
-        self?.say("\(partner) is here! 🐾", seconds: 3)
+    }
+    Online.shared.onFriendsChanged = { [weak self] in
+      self?.refreshStatusItem()
+    }
+    Online.shared.onPresence = { [weak self] in
+      guard let self else { return }
+      self.refreshStatusItem()
+      if let f = Online.shared.activeFriend, !f.waiting {
+        self.petName = f.partnerName
       }
+      let online = Online.shared.partnerOnline
+      if online && !self.partnerWasOnline, let partner = Online.shared.partner, !self.hidden {
+        self.say("\(partner) is online! 🟢", seconds: 2.5)
+      } else if !online && self.partnerWasOnline, let partner = Online.shared.partner, !self.hidden {
+        self.say("\(partner) went offline 💤", seconds: 2)
+      }
+      self.partnerWasOnline = online
     }
     Online.shared.onSync = { [weak self] f, h, action, from in
       guard let self else { return }
@@ -79,7 +97,7 @@ import AppKit
       self.fullness = f
       self.happiness = h
       if let partner = Online.shared.partner { self.petName = partner }
-      if let action {
+      if let action, !self.hidden {
         self.playRemote(action)
         let who = from.isEmpty ? "partner" : from
         let line: String =
@@ -95,6 +113,20 @@ import AppKit
       self.applyingRemote = false
       self.save()
     }
+    Online.shared.restoreBondIfAny()
+  }
+
+  private func refreshStatusItem() {
+    if hidden {
+      statusItem.button?.title = "😴"
+      return
+    }
+    let onlineCount = Online.shared.friends.filter { $0.online && !$0.waiting }.count
+    if onlineCount > 0 {
+      statusItem.button?.title = "🐶🟢"
+    } else {
+      statusItem.button?.title = "🐶"
+    }
   }
 
   private func playRemote(_ action: String) {
@@ -107,9 +139,10 @@ import AppKit
     case "pet":
       happyTicks = Int(2 * fps)
       emit("❤️", count: 3)
-      hop()
+      if activity != .sleep && !untilWoken { hop() }
     case "nap":
-      set(.sleep, seconds: 40)
+      untilWoken = true
+      set(.sleep, seconds: 9_999)
     default:
       break
     }
@@ -125,6 +158,7 @@ import AppKit
   @objc private func step() {
     tick += 1
     decay()
+    guard !hidden else { return }
     move(in: screenFrame())
     animate()
     updateParticles()
@@ -155,7 +189,11 @@ import AppKit
         y = vf.minY
         land(impact: vy)
       }
-    case .held, .sit, .sleep, .eat:
+    case .sleep:
+      y = vf.minY
+      vx = 0
+      vy = 0
+    case .held, .sit, .eat:
       break
     }
     guard activity != .held else { return }
@@ -171,7 +209,10 @@ import AppKit
       dir = -1
       vx = -abs(vx) * 0.6
     }
-    if activity != .fall {
+    // Don't knock them out of a nap with tiny floor wobble / screen-frame shifts.
+    if activity == .sleep || untilWoken {
+      y = vf.minY
+    } else if activity != .fall {
       if y > vf.minY + 0.5 { startFall(vx: 0, vy: 0) } else { y = vf.minY }
     }
   }
@@ -186,9 +227,14 @@ import AppKit
     }
     if activity == .sleep && tick % 45 == 0 { emit("💤") }
 
+    if activity == .sleep && untilWoken {
+      activityTicks = max(activityTicks, Int(60 * fps)) // keep ticking forever while napping
+      return
+    }
     activityTicks -= 1
     guard activityTicks <= 0, activity != .held, activity != .fall else { return }
     if activity == .sleep {
+      untilWoken = false
       set(.sit, seconds: 2)
       say("🥱")
     } else {
@@ -214,11 +260,20 @@ import AppKit
   }
 
   private func set(_ next: Activity, seconds: Double) {
+    if next != .sleep { untilWoken = false }
     activity = next
     activityTicks = Int(seconds * fps)
   }
 
   private func startFall(vx: CGFloat, vy: CGFloat) {
+    // Accidental micro-falls must not end a nap.
+    if untilWoken, abs(vx) < 1, abs(vy) < 1 {
+      y = screenFrame().minY
+      self.vx = 0
+      self.vy = 0
+      activity = .sleep
+      return
+    }
     self.vx = vx
     self.vy = vy
     activity = .fall
@@ -232,6 +287,12 @@ import AppKit
   private func land(impact: CGFloat) {
     vx = 0
     vy = 0
+    if untilWoken {
+      activity = .sleep
+      activityTicks = Int(9_999 * fps)
+      y = screenFrame().minY
+      return
+    }
     set(.sit, seconds: happyTicks > 0 ? 1.5 : 1)
     if !greeted {
       greeted = true
@@ -353,7 +414,7 @@ import AppKit
       guard hypot(m.x - grabStart.x, m.y - grabStart.y) > 3 else { return }
       dragged = true
       targetX = nil
-      activity = .held
+      activity = .held // untilWoken kept — land() puts them back to sleep
       if Bool.random() { say(["put me down!", "wheee~"].randomElement()!) }
     }
     throwVelocity = CGVector(dx: (m.x - lastMouse.x) * 1.5, dy: (m.y - lastMouse.y) * 1.5)
@@ -378,7 +439,12 @@ import AppKit
     happiness = min(100, happiness + 6)
     happyTicks = Int(2 * fps)
     emit("❤️", count: 3)
-    say(activity == .sleep ? "mmh…? 🥱" : ["woof!", "hehe~", "more pets", "❤️"].randomElement()!)
+    if activity == .sleep || untilWoken {
+      say("mmh…? 🥱")
+      pushOnline(action: "pet")
+      return // don't hop — that was waking them out of nap
+    }
+    say(["woof!", "hehe~", "more pets", "❤️"].randomElement()!)
     hop()
     pushOnline(action: "pet")
   }
@@ -401,24 +467,35 @@ import AppKit
     pushOnline(action: "play")
   }
 
-  @objc private func comeHere() {
-    let vf = screenFrame(), margin = spriteSize.width / 2 - 16
-    targetX = min(max(NSEvent.mouseLocation.x, vf.minX + margin), vf.maxX - margin)
-    set(.walk, seconds: 60)
-    say("coming!")
-  }
-
   @objc private func toggleNap() {
     if activity == .sleep {
+      untilWoken = false
       set(.sit, seconds: 2)
       say("🥱")
     } else {
-      set(.sleep, seconds: 40)
+      untilWoken = true
+      set(.sleep, seconds: 9_999)
+      say("zzz…")
       pushOnline(action: "nap")
     }
   }
 
   @objc private func petFromMenu() { pet() }
+
+  @objc private func toggleHide() {
+    hidden.toggle()
+    if hidden {
+      window.orderOut(nil)
+      bubble = nil
+      particles.removeAll()
+    } else {
+      window.orderFrontRegardless()
+      set(.sit, seconds: 2)
+      say("i'm back 🐾")
+      render()
+    }
+    refreshStatusItem()
+  }
 
   @objc private func quit() {
     save()
@@ -431,44 +508,65 @@ import AppKit
   @objc private func onlineInvite() {
     ensureDisplayName()
     Online.shared.create(fullness: fullness, happiness: happiness)
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-      guard let self, let code = Online.shared.code else {
-        self?.alert("Couldn’t reach the server.\nCheck your internet and try again.")
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+      guard let self else { return }
+      let code = Online.shared.activeCode
+        ?? Online.shared.friends.first(where: { $0.waiting })?.code
+      guard let code else {
+        self.alert("Couldn’t reach the server.\nCheck your internet and try again.")
         return
       }
       let site = "https://tamagotchi-udtz.onrender.com"
       let msg = """
-      be my desktop pet 🐶
+      Mochi code \(code)
 
-      1. download Mochi: \(site)
-      2. open it → 🐶 menu → Claim invite
-      3. code: \(code)
+      1) download \(site)
+      2) 🐶 → Claim invite → paste \(code)
       """
       NSPasteboard.general.clearContents()
       NSPasteboard.general.setString(msg, forType: .string)
       self.onlineNote = "waiting · code \(code)"
-      self.alert("Invite copied — paste it to your partner (iMessage / Slack / whatever).\n\nCode: \(code)")
+      self.alert("Invite copied.\n\nYour code is \(code) — send it to your friend now.")
     }
   }
 
   @objc private func onlineClaim() {
     ensureDisplayName()
-    let code = prompt("Claim invite", message: "Paste the code from your partner", placeholder: "")
+    let code = prompt("Claim invite", message: "Paste just the 6-letter code (or the whole invite text)", placeholder: "")
     guard let code, !code.isEmpty else { return }
-    // Allow pasting the whole invite message — pull out a 6-char code.
-    let cleaned = code.uppercased()
-    let token =
-      cleaned.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
-      .map(String.init)
-      .first { $0.count == 6 } ?? cleaned.replacingOccurrences(of: " ", with: "")
+    let token = Online.extractCode(code)
+    onlineNote = "joining \(token)…"
     Online.shared.join(code: token)
   }
 
   @objc private func onlineLeave() {
-    Online.shared.disconnect()
+    Online.shared.leaveAllBonds()
     petName = defaultPetName
     onlineNote = nil
+    partnerWasOnline = false
+    refreshStatusItem()
     say("bye bye…")
+  }
+
+  @objc private func selectFriend(_ sender: NSMenuItem) {
+    guard let code = sender.representedObject as? String else { return }
+    Online.shared.setActive(code: code)
+    if let f = Online.shared.activeFriend {
+      petName = f.waiting ? defaultPetName : f.partnerName
+      if !f.waiting { say("watching \(f.partnerName)", seconds: 2) }
+    }
+    refreshStatusItem()
+  }
+
+  @objc private func removeFriend(_ sender: NSMenuItem) {
+    guard let code = sender.representedObject as? String else { return }
+    Online.shared.removeFriend(code: code)
+    if let f = Online.shared.activeFriend {
+      petName = f.waiting ? defaultPetName : f.partnerName
+    } else {
+      petName = defaultPetName
+    }
+    refreshStatusItem()
   }
 
   @objc private func onlineSetName() {
@@ -513,19 +611,76 @@ import AppKit
     menu.removeAllItems()
     menu.addItem(info("🍖 Fullness    \(bar(fullness))"))
     menu.addItem(info("💛 Happiness  \(bar(happiness))"))
-    if let note = onlineNote { menu.addItem(info("🔗 \(note)")) }
+
+    let friends = Online.shared.friends
+    let onlineN = friends.filter { $0.online && !$0.waiting }.count
+    menu.addItem(info("👥 Friends     \(friends.count) total · \(onlineN) online"))
+
+    if let f = Online.shared.activeFriend, !f.waiting {
+      let dot = f.online ? "🟢" : "⚪️"
+      menu.addItem(info("\(dot) watching \(f.partnerName)"))
+      menu.addItem(info("   🍖 \(bar(f.fullness))  💛 \(bar(f.happiness))"))
+    } else if let note = onlineNote {
+      menu.addItem(info("🔗 \(note)"))
+    }
     menu.addItem(.separator())
-    menu.addItem(item("🦴 Feed", #selector(feed)))
-    menu.addItem(item("🎾 Play", #selector(play)))
-    menu.addItem(item("🤚 Pet", #selector(petFromMenu)))
-    menu.addItem(item("📍 Come here", #selector(comeHere)))
-    menu.addItem(item(activity == .sleep ? "☀️ Wake up" : "💤 Nap", #selector(toggleNap)))
+    if !hidden {
+      menu.addItem(item("🦴 Feed", #selector(feed)))
+      menu.addItem(item("🎾 Play", #selector(play)))
+      menu.addItem(item("🤚 Pet", #selector(petFromMenu)))
+      menu.addItem(item(activity == .sleep ? "☀️ Wake up" : "💤 Nap", #selector(toggleNap)))
+      menu.addItem(.separator())
+    }
+    menu.addItem(item(hidden ? "☀️ Show pet" : "😴 Hide pet (focus mode)", #selector(toggleHide)))
     menu.addItem(.separator())
-    if Online.shared.isBonded, Online.shared.partner != nil {
-      menu.addItem(item("Leave bond", #selector(onlineLeave)))
+
+    // Always show Friends so count / status is visible even at 0.
+    let friendsItem = NSMenuItem(
+      title: "Friends (\(friends.count))",
+      action: nil,
+      keyEquivalent: "")
+    let sub = NSMenu()
+    if friends.isEmpty {
+      sub.addItem(info("No friends yet"))
+      sub.addItem(info("Invite or Claim to bond"))
     } else {
-      menu.addItem(item("Invite partner…", #selector(onlineInvite)))
-      menu.addItem(item("Claim invite…", #selector(onlineClaim)))
+      for f in friends {
+        let dot = f.waiting ? "⏳" : (f.online ? "🟢" : "⚪️")
+        let name = f.waiting ? "code \(f.code) · waiting" : f.partnerName
+        let row = NSMenuItem(
+          title: "\(dot) \(name)",
+          action: #selector(selectFriend(_:)),
+          keyEquivalent: "")
+        row.target = self
+        row.representedObject = f.code
+        if f.code == Online.shared.activeCode { row.state = .on }
+        sub.addItem(row)
+        if !f.waiting {
+          sub.addItem(info("   🍖 \(Int(f.fullness))%  💛 \(Int(f.happiness))%"))
+          if let activity = f.lastActivity {
+            sub.addItem(info("   \(activity)"))
+          }
+        }
+      }
+      sub.addItem(.separator())
+      for f in friends {
+        let name = f.waiting ? f.code : f.partnerName
+        let rm = NSMenuItem(
+          title: "Remove \(name)",
+          action: #selector(removeFriend(_:)),
+          keyEquivalent: "")
+        rm.target = self
+        rm.representedObject = f.code
+        sub.addItem(rm)
+      }
+    }
+    friendsItem.submenu = sub
+    menu.addItem(friendsItem)
+
+    menu.addItem(item("Invite friend…", #selector(onlineInvite)))
+    menu.addItem(item("Claim invite…", #selector(onlineClaim)))
+    if !friends.isEmpty {
+      menu.addItem(item("Leave all bonds", #selector(onlineLeave)))
     }
     menu.addItem(item("My name…", #selector(onlineSetName)))
     menu.addItem(.separator())

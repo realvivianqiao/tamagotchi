@@ -1,15 +1,40 @@
 import AppKit
 import Foundation
 
-/// Tiny WebSocket client for Mochi bond rooms (create / join / sync stats).
+struct FriendBond: Codable, Equatable {
+  var code: String
+  var partnerName: String
+  var online: Bool
+  var waiting: Bool
+  var fullness: Double
+  var happiness: Double
+  var lastActivity: String?
+}
+
+/// Multi-friend bonds: invite/claim many people, see who's online, pick who's on your screen.
 @MainActor final class Online: NSObject, URLSessionWebSocketDelegate {
   static let shared = Online()
 
-  /// Live public server by default. Override with UserDefaults `mochiServer` if needed.
+  private let httpBase = URL(string: "https://tamagotchi-udtz.onrender.com")!
+  private let wsURL = URL(string: "wss://tamagotchi-udtz.onrender.com")!
+
   var serverURL: URL {
     let raw = UserDefaults.standard.string(forKey: "mochiServer")?.trimmingCharacters(in: .whitespacesAndNewlines)
-    if let raw, !raw.isEmpty, let url = URL(string: raw) { return url }
-    return URL(string: "wss://tamagotchi-udtz.onrender.com")!
+    // Ignore stale local-dev overrides so friends sync hits the live server.
+    if let raw, !raw.isEmpty,
+       !raw.contains("127.0.0.1"), !raw.contains("localhost"),
+       let url = URL(string: raw)
+    {
+      return url
+    }
+    return wsURL
+  }
+
+  private var httpRoot: URL {
+    let s = serverURL.absoluteString
+      .replacingOccurrences(of: "wss://", with: "https://")
+      .replacingOccurrences(of: "ws://", with: "http://")
+    return URL(string: s) ?? httpBase
   }
 
   var displayName: String {
@@ -20,13 +45,19 @@ import Foundation
     set { UserDefaults.standard.set(newValue, forKey: "mochiName") }
   }
 
-  private(set) var code: String?
-  private(set) var partner: String?
+  private(set) var friends: [FriendBond] = []
+  private(set) var activeCode: String?
   private(set) var connected = false
 
-  /// Called on the main actor when remote (or echoed) sync arrives.
+  /// Convenience for the friend currently on your desktop.
+  var partner: String? { activeFriend?.partnerName }
+  var partnerOnline: Bool { activeFriend?.online ?? false }
+  var isBonded: Bool { friends.contains { !$0.waiting } }
+
   var onSync: ((Double, Double, String?, String) -> Void)?
   var onStatus: ((String) -> Void)?
+  var onPresence: (() -> Void)?
+  var onFriendsChanged: (() -> Void)?
 
   private var session: URLSession!
   private var task: URLSessionWebSocketTask?
@@ -35,37 +66,104 @@ import Foundation
   override init() {
     super.init()
     session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+    loadFriends()
   }
 
-  var isBonded: Bool { connected && code != nil }
+  var activeFriend: FriendBond? {
+    guard let activeCode else { return friends.first }
+    return friends.first { $0.code == activeCode } ?? friends.first
+  }
+
+  // MARK: - Public API
 
   func create(fullness: Double, happiness: Double) {
-    connectThen {
-      self.send([
-        "type": "create",
-        "name": self.displayName,
-        "fullness": fullness,
-        "happiness": happiness,
-      ])
+    onStatus?("creating invite…")
+    Task { @MainActor in
+      do {
+        let res = try await postJSON(path: "/api/invite", body: [
+          "name": displayName, "fullness": fullness, "happiness": happiness,
+        ])
+        guard let c = res["code"] as? String else {
+          onStatus?("invite failed")
+          return
+        }
+        upsert(FriendBond(
+          code: c, partnerName: "waiting…", online: false, waiting: true,
+          fullness: fullness, happiness: happiness, lastActivity: "invite sent"))
+        activeCode = c
+        saveFriends()
+        onStatus?("waiting · code \(c)")
+        onFriendsChanged?()
+        ensureSocket()
+        attach(code: c)
+      } catch {
+        onStatus?("invite failed: \(error.localizedDescription)")
+      }
     }
   }
 
-  func join(code: String) {
-    connectThen {
-      self.send([
-        "type": "join",
-        "code": code.uppercased(),
-        "name": self.displayName,
-      ])
+  func join(code raw: String) {
+    let token = Self.extractCode(raw)
+    onStatus?("claiming \(token)…")
+    Task { @MainActor in
+      do {
+        let res = try await postJSON(path: "/api/claim", body: ["name": displayName, "code": token])
+        if let err = res["error"] as? String {
+          onStatus?(err)
+          return
+        }
+        let host = (res["hostName"] as? String) ?? "friend"
+        let f = Self.num(res, "fullness") ?? 80
+        let h = Self.num(res, "happiness") ?? 80
+        upsert(FriendBond(
+          code: (res["code"] as? String) ?? token,
+          partnerName: host, online: false, waiting: false,
+          fullness: f, happiness: h, lastActivity: "just bonded"))
+        activeCode = (res["code"] as? String) ?? token
+        saveFriends()
+        onStatus?("bonded with \(host)")
+        onSync?(f, h, nil, host)
+        onFriendsChanged?()
+        ensureSocket()
+        attach(code: activeCode!)
+      } catch {
+        onStatus?("claim failed: \(error.localizedDescription)")
+      }
     }
+  }
+
+  func setActive(code: String) {
+    guard friends.contains(where: { $0.code == code }) else { return }
+    activeCode = code
+    saveFriends()
+    if let f = activeFriend {
+      onSync?(f.fullness, f.happiness, nil, f.partnerName)
+      onStatus?(f.online ? "🟢 \(f.partnerName) online" : "⚪️ \(f.partnerName) offline")
+    }
+    onFriendsChanged?()
+    onPresence?()
+  }
+
+  func removeFriend(code: String) {
+    friends.removeAll { $0.code == code }
+    if activeCode == code { activeCode = friends.first?.code }
+    saveFriends()
+    send(["type": "detach", "code": code])
+    onFriendsChanged?()
+    onPresence?()
   }
 
   func sync(fullness: Double, happiness: Double, action: String? = nil) {
-    guard connected else { return }
+    guard let code = activeCode, connected else { return }
+    if let i = friends.firstIndex(where: { $0.code == code }) {
+      friends[i].fullness = fullness
+      friends[i].happiness = happiness
+      if let action { friends[i].lastActivity = action }
+      saveFriends()
+    }
     var msg: [String: Any] = [
-      "type": "sync",
-      "fullness": fullness,
-      "happiness": happiness,
+      "type": "sync", "code": code,
+      "fullness": fullness, "happiness": happiness,
       "updatedAt": Int(Date().timeIntervalSince1970 * 1000),
     ]
     if let action { msg["action"] = action }
@@ -76,27 +174,123 @@ import Foundation
     task?.cancel(with: .goingAway, reason: nil)
     task = nil
     connected = false
-    code = nil
-    partner = nil
     receiveLoop = false
+    for i in friends.indices { friends[i].online = false }
     onStatus?("offline")
+    onPresence?()
+    onFriendsChanged?()
   }
 
-  // MARK: - Internals
-
-  private func connectThen(_ body: @escaping @MainActor () -> Void) {
+  func leaveAllBonds() {
+    for f in friends { send(["type": "detach", "code": f.code]) }
+    friends.removeAll()
+    activeCode = nil
+    saveFriends()
     disconnect()
+  }
+
+  func restoreBondIfAny() {
+    loadFriends()
+    guard !friends.isEmpty else { return }
+    if activeCode == nil { activeCode = friends.first?.code }
+    onFriendsChanged?()
+    onPresence?()
+    ensureSocket()
+    for f in friends { attach(code: f.code) }
+  }
+
+  static func extractCode(_ raw: String) -> String {
+    let alphabet = Set("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
+    let upper = raw.uppercased()
+    let tokens = upper.split { !$0.isLetter && !$0.isNumber }.map(String.init)
+    if let hit = tokens.last(where: { $0.count == 6 && Set($0).isSubset(of: alphabet) }) {
+      return hit
+    }
+    return String(upper.filter { $0.isLetter || $0.isNumber }.prefix(6))
+  }
+
+  // MARK: - Friends storage
+
+  private func upsert(_ bond: FriendBond) {
+    if let i = friends.firstIndex(where: { $0.code == bond.code }) {
+      var merged = bond
+      if merged.partnerName == "waiting…", !friends[i].waiting {
+        merged.partnerName = friends[i].partnerName
+      }
+      friends[i] = merged
+    } else {
+      friends.append(bond)
+    }
+  }
+
+  private func saveFriends() {
+    let d = UserDefaults.standard
+    if let data = try? JSONEncoder().encode(friends) {
+      d.set(data, forKey: "mochiFriends")
+    }
+    d.set(activeCode, forKey: "mochiActiveCode")
+  }
+
+  private func loadFriends() {
+    let d = UserDefaults.standard
+    if let data = d.data(forKey: "mochiFriends"),
+       let list = try? JSONDecoder().decode([FriendBond].self, from: data)
+    {
+      friends = list.map {
+        var f = $0
+        f.online = false
+        return f
+      }
+    } else if let c = d.string(forKey: "mochiBondCode") {
+      // migrate single-bond
+      let name = d.string(forKey: "mochiBondPartner") ?? "friend"
+      friends = [FriendBond(code: c, partnerName: name, online: false, waiting: false, fullness: 80, happiness: 80, lastActivity: nil)]
+      activeCode = c
+      saveFriends()
+      d.removeObject(forKey: "mochiBondCode")
+      d.removeObject(forKey: "mochiBondPartner")
+    }
+    activeCode = d.string(forKey: "mochiActiveCode") ?? friends.first?.code
+  }
+
+  // MARK: - HTTP / WS
+
+  private func postJSON(path: String, body: [String: Any]) async throws -> [String: Any] {
+    guard let url = URL(string: path, relativeTo: httpRoot)?.absoluteURL else {
+      throw NSError(domain: "Mochi", code: 1, userInfo: [NSLocalizedDescriptionKey: "bad url"])
+    }
+    var req = URLRequest(url: url)
+    req.httpMethod = "POST"
+    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    req.timeoutInterval = 60
+    req.httpBody = try JSONSerialization.data(withJSONObject: body)
+    let (data, resp) = try await URLSession.shared.data(for: req)
+    let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+    let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+    if status >= 400 {
+      if json["error"] != nil { return json }
+      throw NSError(domain: "Mochi", code: status, userInfo: [NSLocalizedDescriptionKey: (json["error"] as? String) ?? "HTTP \(status)"])
+    }
+    return json
+  }
+
+  private func ensureSocket() {
+    if task != nil, connected { return }
+    task?.cancel(with: .goingAway, reason: nil)
+    receiveLoop = false
     let t = session.webSocketTask(with: serverURL)
     task = t
     receiveLoop = true
     t.resume()
     connected = true
-    onStatus?("connecting…")
     listen()
-    // Give the socket a beat, then send.
+  }
+
+  private func attach(code: String) {
+    ensureSocket()
     Task { @MainActor in
-      try? await Task.sleep(nanoseconds: 150_000_000)
-      body()
+      try? await Task.sleep(nanoseconds: 300_000_000)
+      send(["type": "attach", "code": code, "name": displayName])
     }
   }
 
@@ -104,11 +298,7 @@ import Foundation
     guard let task, let data = try? JSONSerialization.data(withJSONObject: msg),
           let text = String(data: data, encoding: .utf8)
     else { return }
-    task.send(.string(text)) { error in
-      if let error {
-        Task { @MainActor in self.onStatus?("send failed: \(error.localizedDescription)") }
-      }
-    }
+    task.send(.string(text)) { _ in }
   }
 
   private func listen() {
@@ -117,9 +307,11 @@ import Foundation
       Task { @MainActor in
         guard let self else { return }
         switch result {
-        case .failure(let error):
+        case .failure:
           self.connected = false
-          self.onStatus?("disconnected: \(error.localizedDescription)")
+          for i in self.friends.indices { self.friends[i].online = false }
+          self.onPresence?()
+          self.onFriendsChanged?()
         case .success(let message):
           if case .string(let text) = message { self.handle(text) }
           self.listen()
@@ -136,36 +328,104 @@ import Foundation
 
     switch type {
     case "room":
-      code = json["code"] as? String
-      partner = json["partner"] as? String
-      connected = true
-      if let f = Self.num(json, "fullness"), let h = Self.num(json, "happiness") {
-        onSync?(f, h, nil, partner ?? displayName)
-      }
-      if let partner {
-        onStatus?("bonded with \(partner) · \(code ?? "")")
-      } else {
-        onStatus?("room \(code ?? "") — waiting for partner")
-      }
-
+      applyRoom(json)
+    case "presence":
+      applyPresence(json)
     case "sync":
+      let code = (json["code"] as? String) ?? activeCode
       let f = Self.num(json, "fullness") ?? 0
       let h = Self.num(json, "happiness") ?? 0
       let action = json["action"] as? String
       let from = (json["from"] as? String) ?? ""
-      // Ignore our own echo for action animations; still apply stats.
-      onSync?(f, h, from == displayName ? nil : action, from)
+      if let code, let i = friends.firstIndex(where: { $0.code == code }) {
+        friends[i].fullness = f
+        friends[i].happiness = h
+        friends[i].waiting = false
+        if let action { friends[i].lastActivity = "\(from.isEmpty ? "friend" : from): \(action)" }
+        if from != displayName, let name = friends[i].partnerName as String? {
+          _ = name
+        }
+        if friends[i].partnerName == "waiting…", !from.isEmpty, from != displayName {
+          friends[i].partnerName = from
+        }
+        saveFriends()
+      }
+      if code == nil || code == activeCode {
+        onSync?(f, h, from == displayName ? nil : action, from)
+      }
+      onFriendsChanged?()
 
     case "system":
       onStatus?(json["text"] as? String ?? "ok")
-
     case "error":
       onStatus?(json["text"] as? String ?? "error")
-      connected = false
-
     default:
       break
     }
+  }
+
+  private func applyRoom(_ json: [String: Any]) {
+    guard let code = json["code"] as? String else { return }
+    let online = (json["partnerOnline"] as? Bool) ?? ((json["partner"] as? String)?.isEmpty == false)
+    let partner = json["partner"] as? String
+    let f = Self.num(json, "fullness")
+    let h = Self.num(json, "happiness")
+
+    if let i = friends.firstIndex(where: { $0.code == code }) {
+      friends[i].online = online
+      if let partner, !partner.isEmpty {
+        friends[i].partnerName = partner
+        friends[i].waiting = false
+      }
+      if let f { friends[i].fullness = f }
+      if let h { friends[i].happiness = h }
+      friends[i].lastActivity = online ? "online now" : "offline"
+    } else {
+      friends.append(FriendBond(
+        code: code,
+        partnerName: partner ?? "friend",
+        online: online,
+        waiting: partner == nil,
+        fullness: f ?? 80,
+        happiness: h ?? 80,
+        lastActivity: online ? "online now" : nil))
+      if activeCode == nil { activeCode = code }
+    }
+    saveFriends()
+
+    if code == activeCode {
+      if let partner, online {
+        onStatus?("🟢 \(partner) online")
+      } else if let name = friends.first(where: { $0.code == code })?.partnerName {
+        onStatus?(online ? "🟢 \(name) online" : "⚪️ \(name) offline")
+      }
+      if let f, let h { onSync?(f, h, nil, partner ?? displayName) }
+    }
+    onPresence?()
+    onFriendsChanged?()
+  }
+
+  private func applyPresence(_ json: [String: Any]) {
+    let code = (json["code"] as? String) ?? activeCode
+    let online = (json["partnerOnline"] as? Bool) ?? false
+    let partner = json["partner"] as? String
+    guard let code else { return }
+    if let i = friends.firstIndex(where: { $0.code == code }) {
+      let was = friends[i].online
+      friends[i].online = online
+      if let partner, !partner.isEmpty {
+        friends[i].partnerName = partner
+        friends[i].waiting = false
+      }
+      friends[i].lastActivity = online ? "online now" : "went offline"
+      saveFriends()
+      if code == activeCode {
+        onStatus?(online ? "🟢 \(friends[i].partnerName) online" : "⚪️ \(friends[i].partnerName) offline")
+        if was != online { onPresence?() }
+      }
+    }
+    onFriendsChanged?()
+    onPresence?()
   }
 
   private static func num(_ json: [String: Any], _ key: String) -> Double? {

@@ -66,6 +66,7 @@ async function saveInvites() {
 }
 
 function roomPayload(room, self) {
+  const online = [...room.members.values()];
   const others = [...room.members.entries()]
     .filter(([ws]) => ws !== self)
     .map(([, name]) => name);
@@ -77,8 +78,10 @@ function roomPayload(room, self) {
     updatedAt: room.updatedAt,
     you: room.members.get(self) || "",
     partner: others[0] || null,
-    members: [...room.members.values()],
-  };
+    partnerOnline: others.length > 0,
+    online,
+    members: online,
+  }; // `code` lets multi-friend clients update the right person
 }
 
 function send(ws, msg) {
@@ -108,18 +111,43 @@ function ensureRoom(code) {
   return room;
 }
 
-function leave(ws) {
-  const room = ws.room;
-  if (!room) return;
+function notifyRoom(room, leavingName = null) {
+  for (const peer of room.members.keys()) {
+    send(peer, roomPayload(room, peer));
+    send(peer, {
+      type: "presence",
+      code: room.code,
+      partnerOnline: room.members.size > 1,
+      partner: [...room.members.values()].find((n) => n !== room.members.get(peer)) || leavingName,
+      online: [...room.members.values()],
+    });
+  }
+}
+
+/** Leave one room (supports multi-friend: one socket in many rooms). */
+function leaveRoom(ws, code) {
+  if (!ws.rooms) ws.rooms = new Map();
+  const room = rooms.get(code);
+  if (!room || !room.members.has(ws)) {
+    ws.rooms.delete(code);
+    return;
+  }
+  const leavingName = room.members.get(ws);
   room.members.delete(ws);
-  ws.room = null;
+  ws.rooms.delete(code);
+  if (ws.room === room) ws.room = ws.rooms.size ? rooms.get([...ws.rooms.keys()][0]) : null;
   if (room.members.size === 0) {
     room.emptySince = Date.now();
     return;
   }
   room.emptySince = null;
-  for (const peer of room.members.keys()) send(peer, roomPayload(room, peer));
-  broadcast(room, { type: "system", text: "partner left" });
+  notifyRoom(room, leavingName);
+}
+
+function leave(ws) {
+  if (!ws.rooms) ws.rooms = new Map();
+  for (const code of [...ws.rooms.keys()]) leaveRoom(ws, code);
+  ws.room = null;
 }
 
 setInterval(() => {
@@ -247,6 +275,7 @@ const wss = new WebSocketServer({ server: httpServer });
 
 wss.on("connection", (ws) => {
   ws.room = null;
+  ws.rooms = new Map(); // code -> display name in that room
 
   ws.on("message", (raw) => {
     let msg;
@@ -256,36 +285,41 @@ wss.on("connection", (ws) => {
       return send(ws, { type: "error", text: "bad json" });
     }
 
-    // Attach to an existing invite/room after HTTP invite/claim
+    // Attach to a friend room (one socket can be in many rooms)
     if (msg.type === "attach" || msg.type === "join") {
       const c = String(msg.code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
       const name = String(msg.name || "friend").slice(0, 24);
       const room = ensureRoom(c);
-      if (!room) return send(ws, { type: "error", text: "room not found" });
+      if (!room) return send(ws, { type: "error", text: "room not found", code: c });
       if (room.members.size >= 2 && ![...room.members.values()].includes(name)) {
-        return send(ws, { type: "error", text: "room full (v1 is 2 people)" });
+        return send(ws, { type: "error", text: "already bonded (2 people max)", code: c });
       }
-      leave(ws);
-      // replace existing socket for same name (reconnect)
-      for (const [peer, n] of room.members) {
-        if (n === name) {
+      // replace existing socket for same name in THIS room only
+      for (const [peer, n] of [...room.members]) {
+        if (n === name && peer !== ws) {
           room.members.delete(peer);
-          peer.room = null;
+          if (peer.rooms) peer.rooms.delete(c);
         }
       }
+      leaveRoom(ws, c);
       room.members.set(ws, name);
       room.emptySince = null;
       room.updatedAt = Date.now();
+      ws.rooms.set(c, name);
       ws.room = room;
       const inv = invites.get(c);
       if (inv && name !== inv.hostName) inv.guestName = name;
-      for (const peer of room.members.keys()) send(peer, roomPayload(room, peer));
+      notifyRoom(room);
       return;
     }
 
+    if (msg.type === "detach") {
+      const c = String(msg.code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+      leaveRoom(ws, c);
+      return send(ws, { type: "detached", code: c });
+    }
+
     if (msg.type === "create") {
-      // legacy path — also writes durable invite
-      leave(ws);
       const name = String(msg.name || "friend").slice(0, 24);
       const c = uniqueCode();
       const inv = {
@@ -306,13 +340,15 @@ wss.on("connection", (ws) => {
         members: new Map([[ws, name]]),
       };
       rooms.set(c, room);
+      ws.rooms.set(c, name);
       ws.room = room;
       return send(ws, roomPayload(room, ws));
     }
 
     if (msg.type === "sync") {
-      const room = ws.room;
-      if (!room) return;
+      const c = String(msg.code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+      const room = (c && rooms.get(c)) || ws.room;
+      if (!room || !room.members.has(ws)) return;
       const at = Number(msg.updatedAt) || Date.now();
       if (at < room.updatedAt) return send(ws, roomPayload(room, ws));
       if (Number.isFinite(msg.fullness)) room.fullness = Math.max(0, Math.min(100, msg.fullness));
@@ -325,6 +361,7 @@ wss.on("connection", (ws) => {
       }
       broadcast(room, {
         type: "sync",
+        code: room.code,
         fullness: room.fullness,
         happiness: room.happiness,
         updatedAt: room.updatedAt,

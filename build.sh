@@ -1,11 +1,17 @@
 #!/bin/bash
-# Builds build/Mochi.app. Run it with: open build/Mochi.app
+# Builds build/Mochi.app (universal). Run: open build/Mochi.app
 set -euo pipefail
 cd "$(dirname "$0")"
 APP=build/Mochi.app
 mkdir -p "$APP/Contents/MacOS"
-swiftc -O -swift-version 5 \
+MIN=13.0
+swiftc -O -swift-version 5 -target "arm64-apple-macosx${MIN}" \
   main.swift Sprites.swift PetView.swift Pet.swift Online.swift \
-  -o "$APP/Contents/MacOS/Mochi"
+  -o /tmp/Mochi-arm64
+swiftc -O -swift-version 5 -target "x86_64-apple-macosx${MIN}" \
+  main.swift Sprites.swift PetView.swift Pet.swift Online.swift \
+  -o /tmp/Mochi-x86_64
+lipo -create /tmp/Mochi-arm64 /tmp/Mochi-x86_64 -output "$APP/Contents/MacOS/Mochi"
 cp Info.plist "$APP/Contents/Info.plist"
-echo "Built $APP"
+codesign --force --deep --sign - "$APP"
+echo "Built $APP (universal + ad-hoc signed)"

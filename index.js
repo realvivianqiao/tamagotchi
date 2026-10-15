@@ -1,12 +1,27 @@
 import { WebSocketServer } from "ws";
 import { createServer } from "http";
+import { readFile } from "fs/promises";
+import { join, extname } from "path";
+import { fileURLToPath } from "url";
 
 const PORT = Number(process.env.PORT || 3847);
+const __dirname = fileURLToPath(new URL(".", import.meta.url));
+const publicDir = join(__dirname, "public");
 
 /** @typedef {{ code: string, fullness: number, happiness: number, updatedAt: number, members: Map<any, string> }} Room */
-
 /** @type {Map<string, Room>} */
 const rooms = new Map();
+
+const mime = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".png": "image/png",
+  ".zip": "application/zip",
+  ".ico": "image/x-icon",
+  ".svg": "image/svg+xml",
+  ".txt": "text/plain; charset=utf-8",
+};
 
 function code() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -61,9 +76,33 @@ function leave(ws) {
   broadcast(room, { type: "system", text: "partner left" });
 }
 
-const httpServer = createServer((_req, res) => {
-  res.writeHead(200, { "content-type": "text/plain" });
-  res.end("mochi online ✓\n");
+async function serveStatic(req, res) {
+  try {
+    let path = (req.url || "/").split("?")[0];
+    if (path === "/") path = "/index.html";
+    // no path traversal
+    const safe = join(publicDir, path.replace(/^\/+/, ""));
+    if (!safe.startsWith(publicDir)) {
+      res.writeHead(400);
+      return res.end("bad path");
+    }
+    const data = await readFile(safe);
+    const type = mime[extname(safe)] || "application/octet-stream";
+    const headers = { "content-type": type };
+    if (extname(safe) === ".zip") {
+      headers["content-disposition"] = 'attachment; filename="Mochi.zip"';
+    }
+    res.writeHead(200, headers);
+    res.end(data);
+  } catch {
+    res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+    res.end("not found\n");
+  }
+}
+
+const httpServer = createServer((req, res) => {
+  // WebSocket upgrade is handled by ws; plain HTTP → site / download
+  serveStatic(req, res);
 });
 
 const wss = new WebSocketServer({ server: httpServer });
@@ -134,5 +173,5 @@ wss.on("connection", (ws) => {
 });
 
 httpServer.listen(PORT, () => {
-  console.log(`mochi server on ws://localhost:${PORT}`);
+  console.log(`mochi site + ws on :${PORT}`);
 });

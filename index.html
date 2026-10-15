@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mochi — a desktop pet for two</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink: #2a1a0f;
+      --cream: #fff6e8;
+      --sand: #f0d9b5;
+      --gold: #e8a84c;
+      --bark: #4a2c12;
+      --sky: #cfe8ff;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      font-family: "DM Sans", system-ui, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(ellipse 80% 50% at 20% 0%, var(--sky), transparent 55%),
+        radial-gradient(ellipse 70% 45% at 90% 10%, #ffe0a8, transparent 50%),
+        linear-gradient(180deg, #f7efe3 0%, var(--cream) 45%, #e8d4b8 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 8vh 1.5rem 4rem;
+    }
+    main {
+      width: min(42rem, 100%);
+      text-align: center;
+    }
+    .pup {
+      width: 152px;
+      height: 112px;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      margin: 0 auto 1.25rem;
+      filter: drop-shadow(0 12px 18px rgba(74, 44, 18, 0.18));
+      animation: bob 2.8s ease-in-out infinite;
+    }
+    @keyframes bob {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-6px); }
+    }
+    h1 {
+      font-family: Fraunces, Georgia, serif;
+      font-weight: 700;
+      font-size: clamp(2.6rem, 8vw, 4rem);
+      line-height: 1.05;
+      letter-spacing: -0.02em;
+      margin: 0 0 0.6rem;
+      color: var(--bark);
+    }
+    .lede {
+      font-size: 1.15rem;
+      line-height: 1.45;
+      max-width: 28rem;
+      margin: 0 auto 1.75rem;
+      opacity: 0.85;
+    }
+    .cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+      background: var(--bark);
+      color: var(--cream);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 1.05rem;
+      padding: 0.95rem 1.4rem;
+      border-radius: 999px;
+      box-shadow: 0 10px 0 #2a1608;
+      transition: transform 0.12s ease, box-shadow 0.12s ease;
+    }
+    .cta:hover { transform: translateY(2px); box-shadow: 0 8px 0 #2a1608; }
+    .cta:active { transform: translateY(6px); box-shadow: 0 4px 0 #2a1608; }
+    .meta {
+      margin-top: 0.9rem;
+      font-size: 0.9rem;
+      opacity: 0.65;
+    }
+    ol {
+      text-align: left;
+      max-width: 26rem;
+      margin: 2.75rem auto 0;
+      padding: 1.25rem 1.25rem 1.25rem 2.25rem;
+      background: rgba(255, 255, 255, 0.45);
+      border: 1px solid rgba(74, 44, 18, 0.12);
+      border-radius: 1rem;
+      line-height: 1.55;
+    }
+    ol li { margin: 0.45rem 0; }
+    ol strong { font-weight: 600; }
+    footer {
+      margin-top: 3rem;
+      font-size: 0.8rem;
+      opacity: 0.5;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <img class="pup" src="/sprites.png" alt="Mochi the pixel dog" width="152" height="112" />
+    <h1>Mochi</h1>
+    <p class="lede">A tiny dog on your Mac. Invite someone you like — feed them, pet them, play — and they see it happen on their screen.</p>
+    <a class="cta" href="/Mochi.zip">Download for Mac</a>
+    <p class="meta">macOS · unzip → open Mochi.app · right‑click → Open the first time</p>
+    <ol>
+      <li><strong>Download</strong> and open Mochi. You get a pet immediately.</li>
+      <li>Click the 🐶 menu → <strong>Invite partner…</strong> (copies a message).</li>
+      <li>They download from this page → <strong>Claim invite…</strong> → paste your code.</li>
+      <li>You’re bonded. Feed / pet / play shows up for both of you.</li>
+    </ol>
+  </main>
+  <footer>free · sleeps after idle · first open after a nap can take a minute</footer>
+</body>
+</html>

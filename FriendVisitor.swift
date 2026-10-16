@@ -65,7 +65,16 @@ import AppKit
   /// Fired when the visitor is close and the gesture starts (host should react *now*).
   var onGestureStart: (() -> Void)?
   /// Centers almost overlapping — hip-to-hip, not across the desk.
-  private let visitGap: CGFloat = 48
+  private let visitGap: CGFloat = 36
+
+  /// Same display as the host pad — never `NSScreen.main` alone (multi-monitor used to
+  /// park Max on the laptop while Zuzu stayed on the external screen = “miles apart”).
+  private func hostVisibleFrame(hx: CGFloat? = nil, hy: CGFloat? = nil) -> CGRect {
+    let px = hx ?? hostX?() ?? x
+    let py = hy ?? hostY?() ?? y
+    let p = CGPoint(x: px, y: py + 1)
+    return (NSScreen.screens.first { $0.frame.contains(p) } ?? NSScreen.main!).visibleFrame
+  }
 
   init(
     code: String, name: String, species: Species, near hostX: CGFloat,
@@ -77,7 +86,8 @@ import AppKit
     self.ephemeral = ephemeral
     // Interaction visitors start "visiting" immediately so idle gap-push never runs.
     self.isVisiting = ephemeral
-    let screen = NSScreen.main!.visibleFrame
+    let screen = (NSScreen.screens.first { $0.frame.contains(CGPoint(x: hostX, y: $0.frame.midY)) }
+      ?? NSScreen.main!).visibleFrame
     let roomRight = screen.maxX - hostX
     let roomLeft = hostX - screen.minX
     visitSide = roomRight >= roomLeft ? 1 : -1
@@ -177,18 +187,24 @@ import AppKit
 
   /// Hard-stick to the host’s side so they never look rooms apart.
   private func snapBesideHost() {
-    let screen = NSScreen.main!.visibleFrame
     let hx = hostX?() ?? x
-    let hy = hostY?() ?? screen.minY
+    let hy = hostY?() ?? y
+    let screen = hostVisibleFrame(hx: hx, hy: hy)
     // Keep the chosen side unless the host is jammed against that edge.
     if visitSide > 0, hx > screen.maxX - 120 { visitSide = -1 }
     if visitSide < 0, hx < screen.minX + 120 { visitSide = 1 }
-    x = min(max(hx + visitSide * visitGap, screen.minX + 50), screen.maxX - 50)
+    // Nudge inward if the guest would clamp away from the host (edge of screen).
+    var plantX = hx
+    let want = hx + visitSide * visitGap
+    if want < screen.minX + 50 || want > screen.maxX - 50 {
+      plantX = min(max(hx, screen.minX + 80), screen.maxX - 80)
+    }
+    x = min(max(plantX + visitSide * visitGap, screen.minX + 50), screen.maxX - 50)
     dir = -visitSide
     switch species {
     case .bird: y = hy + 28
     case .octopus: y = max(screen.minY + 14, hy)
-    case .dog: y = screen.minY
+    case .dog: y = hy  // same floor as host (not main-screen minY)
     }
   }
 
@@ -413,7 +429,9 @@ import AppKit
   }
 
   private func runVisitGestureTick(hostX hx: CGFloat, hostY hy: CGFloat) {
-    let floor = NSScreen.main!.visibleFrame.minY
+    // Use the host’s floor — not the main display’s — so multi-monitor stays glued.
+    let floor = hostVisibleFrame(hx: hx, hy: hy).minY
+    let dogY = hy
     dir = -visitSide
     switch visitAction {
     case "poke":
@@ -427,7 +445,7 @@ import AppKit
       } else if species == .octopus {
         y = max(floor + 10, hy + (jab ? 2 : 10))
       } else {
-        y = floor + (jab ? 6 : 0)
+        y = dogY + (jab ? 6 : 0)
       }
       if visitTicks % 14 == 0 {
         emit("💢", count: jab ? 2 : 1)
@@ -436,7 +454,7 @@ import AppKit
     case "play":
       // Energetic beside host — dog play-bows / hops, bird loops, octopus drifts.
       let t = Double(visitTicks) / fps
-      x = hx + visitSide * (visitGap + CGFloat(sin(t * 4.2)) * 10)
+      x = hx + visitSide * (visitGap + CGFloat(sin(t * 4.2)) * 8)
       if species == .bird {
         y = hy + 28 + CGFloat(sin(t * 5)) * 12
         if visitTicks % 10 == 0 { emit("✨"); emit("🪶") }
@@ -445,7 +463,7 @@ import AppKit
         if visitTicks % 16 == 0 { emit("🫧"); emit("🌊") }
       } else {
         // Dog: run-in-place hops + ball
-        y = floor
+        y = dogY
         if visitTicks % 9 == 0 { hop(); emit("💨") }
         if visitTicks % 15 == 0 { emit("🎾") }
       }
@@ -459,17 +477,17 @@ import AppKit
         y = max(floor + 12, hy + CGFloat(sin(Double(visitTicks) / 8)) * 3)
         if visitTicks % 16 == 0 { emit("🫧"); emit("❤️") }
       } else {
-        y = floor + (visitTicks / 10 % 2 == 0 ? 3 : 0)
+        y = dogY + (visitTicks / 10 % 2 == 0 ? 3 : 0)
         if visitTicks % 16 == 0 { emit("❤️", count: 2) }
       }
     case "feed":
       x = hx + visitSide * visitGap
       let receiving = visitRole == .outgoingTarget
       if receiving {
-        y = species == .bird ? hy + 10 : (species == .octopus ? max(floor + 12, hy) : floor)
+        y = species == .bird ? hy + 10 : (species == .octopus ? max(floor + 12, hy) : dogY)
         if visitTicks % 14 == 0 { emit(Self.foodEmoji(species)) }
       } else {
-        y = species == .bird ? hy + 14 : (species == .octopus ? max(floor + 12, hy) : floor)
+        y = species == .bird ? hy + 14 : (species == .octopus ? max(floor + 12, hy) : dogY)
         if visitTicks % 16 == 0 {
           offerFoodTowardHost(Self.foodEmoji(hostSpecies?() ?? species), count: 1)
         }

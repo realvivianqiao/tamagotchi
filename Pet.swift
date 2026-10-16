@@ -72,17 +72,20 @@ import AppKit
   /// Explicit dance pose so we aren’t stuck toggling sit ↔ walk legs.
   private var dancePoseOverride: Pose?
   private var dancePoseTicks = 0
+  /// Current groove for a few bars — changes on downbeats, not every hit.
+  private var danceGroove = 0
+  private var danceGrooveBeatsLeft = 0
   /// Status / context menu open — freeze dance so the menu doesn’t bounce with hops.
   private var menuIsOpen = false
 
   private var grabStart = CGPoint.zero, lastMouse = CGPoint.zero, grabOffset = CGPoint.zero
   /// Which body part the current press landed on (nose / head / tail…).
   private var grabPart: BodyPart = .body
-  private var swallowRelease = false // double-click hide — don't also body-touch
+  private var swallowRelease = false // double-click quit — don't also body-touch
   /// Our own double-click counter — NSPanel clickCount is unreliable for floating pets.
   private var pressCount = 0
   private var pressAt: TimeInterval = 0
-  /// Bumped on double-click hide so a deferred single-click touch can’t still fire.
+  /// Bumped on double-click quit so a deferred single-click touch can’t still fire.
   private var touchGeneration = 0
   private var pendingPetWork: DispatchWorkItem?
   private var lastDragTime: TimeInterval = 0
@@ -156,11 +159,11 @@ import AppKit
       say("hi! i'm \(pick.defaultName)", seconds: 3.5)
     }
 
-    window.alphaValue = 1
-    window.ignoresMouseEvents = false
-    window.orderFrontRegardless()
     refreshStatusItem()
     restoreNapIfNeeded()
+    // Always land on-screen after launch — Downloads/quarantine relaunches used to
+    // bring a process up with no visible pad, which felt like “won’t reopen.”
+    presentOnScreen(announce: !PetPicker.hasChosen)
     wireAmbientGreetings()
     wireSpotifyDance()
 
@@ -318,7 +321,7 @@ import AppKit
     ])
   }
 
-  /// Hide the desktop pad. Menu bar becomes a clear “Show pet” button (one click back).
+  /// Hide the desktop pad. Menu-bar emoji stays put — click it → Show.
   private func setHidden(_ hide: Bool) {
     guard hidden != hide else { return }
     hidden = hide
@@ -354,34 +357,62 @@ import AppKit
     refreshStatusItem()
   }
 
+  /// Reopening CoPet.app / Dock brings the pad back (and on-screen).
+  func revealIfHidden() {
+    noteUserTouch()
+    if hidden { setHidden(false) }
+    presentOnScreen(announce: true)
+  }
+
+  /// Put the pad on the main display, frontmost — used on launch + reopen.
+  private func presentOnScreen(announce: Bool) {
+    hidden = false
+    let vf = screenFrame()
+    x = vf.midX
+    if untilWoken {
+      y = sleepFloor(in: vf)
+      activity = .sleep
+      activityTicks = Int(9_999 * fps)
+    } else {
+      y = restFloor(in: vf)
+      activity = .sit
+      activityTicks = Int(2.5 * fps)
+    }
+    window.alphaValue = 1
+    window.ignoresMouseEvents = false
+    window.orderFrontRegardless()
+    refreshStatusItem()
+    render()
+    if announce {
+      say("i'm here", seconds: 2.0)
+    }
+  }
+
   @objc private func showPet() {
     noteUserTouch()
     setHidden(false)
   }
 
   private func refreshStatusItem() {
+    // Spell out “CoPet” so it’s obvious next to Datadog / Defender / eye-slash apps.
     statusItem.isVisible = true
-    let button = statusItem.button
-    if hidden {
-      // No menu — one click on the bar item brings the pet back.
-      statusItem.menu = nil
-      button?.title = "Show pet"
-      button?.toolTip = "Click to show CoPet again"
-      button?.target = self
-      button?.action = #selector(showPet)
-      return
-    }
-    // Normal mode: emoji opens the full menu.
+    statusItem.autosaveName = "copet-status-item"
     statusItem.menu = menu
+    let button = statusItem.button
     button?.target = nil
     button?.action = nil
-    button?.toolTip = "CoPet"
-    if !Online.shared.appearOnline {
-      button?.title = "\(species.emoji)⚪️"
-      return
-    }
+    button?.image = nil
+    button?.toolTip = hidden
+      ? "CoPet is hidden — click, then Show \(Online.shared.padName)"
+      : "CoPet"
     let onlineCount = Online.shared.friends.filter { $0.online && !$0.waiting }.count
-    button?.title = onlineCount > 0 ? "\(species.emoji)🟢" : species.emoji
+    let presence =
+      !Online.shared.appearOnline ? "○"
+      : (onlineCount > 0 ? "●" : "")
+    // Keep the word “CoPet” so it’s obvious next to Datadog / other bar icons.
+    button?.title = hidden
+      ? "\(species.emoji)CoPet"
+      : "\(species.emoji)CoPet\(presence)"
   }
 
   /// Only announce a real offline → online transition. Never for “already online.”
@@ -513,6 +544,8 @@ import AppKit
       vy = 0
       targetX = nil
       wanderLock = nil
+      // animate() is skipped here — clear raised paw/tentacle or it sticks forever.
+      visitPawTicks = 0
       y = sleepFloor(in: screenFrame())
       pinStaticSleepZzz()
       tickBubble() // still expire “friend online” bubbles while napping
@@ -551,12 +584,12 @@ import AppKit
       visitor = nil
     }
 
-    // Don't stroll away mid-visit — stay put, but keep the gesture pose animating
-    // (run/walk/fly frames). Never convert fly→sit mid-play/poke.
+    // Don't stroll away mid-visit — freeze X, keep gesture pose animating.
     if hostingVisit || visitor?.isVisiting == true {
       if activity == .walk || activity == .run {
         y = restFloor(in: vf)
         if tick % 8 == 0 { walkFrame ^= 1 }
+        render()
         return
       }
       if activity == .fly || activity == .glide {
@@ -564,6 +597,13 @@ import AppKit
         let base = species == .bird ? restFloor(in: vf) + 28 : restFloor(in: vf) + 14
         y = base + CGFloat(sin(Double(tick) / 5)) * 5
         if tick % 8 == 0 { walkFrame ^= 1 }
+        render()
+        return
+      }
+      // Sit / eat / sleep mid-visit: still don't wander.
+      if activity == .sit || activity == .eat || activity == .sleep {
+        y = activity == .sleep ? sleepFloor(in: vf) : restFloor(in: vf)
+        render()
         return
       }
     }
@@ -847,9 +887,10 @@ import AppKit
       return
     }
     // Dance to Spotify on (and awake) → pulseToBeat drives the moves.
+    // Stay on feet between beats — never flop into sit mid-song.
     if SpotifyDance.shared.enabled {
       if activity != .fall, activity != .held {
-        set(.sit, seconds: 4)
+        set(species == .bird ? .fly : (species == .octopus ? .glide : .run), seconds: 4)
       }
       return
     }
@@ -942,7 +983,12 @@ import AppKit
     vx = 0
     vy = 0
     bounceCount = 0
-    if impact < -6 { squashTicks = max(squashTicks, 6) }
+    // Mid-dance: light squash only — heavy flat squash reads as “lying down.”
+    if isDanceMode {
+      if impact < -7 { squashTicks = max(squashTicks, 4) }
+    } else if impact < -6 {
+      squashTicks = max(squashTicks, 6)
+    }
     logApp("land", extra: ["impact": Double(impact)])
     let vf = screenFrame()
     if untilWoken {
@@ -952,6 +998,20 @@ import AppKit
       return
     }
     y = restFloor(in: vf)
+    // Never sit after a dance hop — that was the stand→sit→flat flicker.
+    if isDanceMode || SpotifyDance.shared.enabled {
+      switch species {
+      case .dog: set(.run, seconds: 2.5)
+      case .bird: set(.fly, seconds: 2.5)
+      case .octopus: set(.glide, seconds: 2.5)
+      }
+      if dancePoseOverride == nil {
+        holdDancePose(.walk(walkFrame), beats: 0.9)
+      } else {
+        dancePoseTicks = max(dancePoseTicks, Int(0.8 * fps))
+      }
+      return
+    }
     set(.sit, seconds: happyTicks > 0 ? 1.5 : 1)
     if !greeted {
       greeted = true
@@ -1028,16 +1088,20 @@ import AppKit
     let dancing = isDanceMode
     let happy = !angry && (happyTicks > 0 || dancing || activity == .eat || activity == .run || activity == .fly || visitPawTicks > 0)
     var l = Look(species: species)
-    if visitPawTicks > 0, species == .dog || species == .octopus {
+    // Never keep a raised tentacle/paw while asleep (nap path skips animate()).
+    if visitPawTicks > 0, activity != .sleep, species == .dog || species == .octopus {
       l.pose = .hang // raised paw / tentacle while petting a friend
     } else if dancing, let pose = dancePoseOverride, dancePoseTicks > 0 {
       l.pose = pose
+    } else if dancing {
+      // Between beats: stay animated — glide/sit would look like a parked blob.
+      l.pose = .walk(walkFrame)
     } else {
       switch activity {
       case .walk, .run, .fly: l.pose = .walk(walkFrame)
       case .glide, .sit, .eat: l.pose = .sit
       case .sleep: l.pose = .lie
-      case .held, .fall: l.pose = dancing ? .walk(walkFrame) : .hang
+      case .held, .fall: l.pose = .hang
       }
     }
     // Don't blink-closed while dancing — reads as napping.
@@ -1051,8 +1115,9 @@ import AppKit
       l.eyes = .open
     }
     l.tongue = !angry && (activity == .eat ? walkFrame == 0 : happy)
-    // Octopus tentacle bob stays lazy even when “happy.”
-    let wagFast = happy || dancing || activity == .fly || (activity == .glide && species != .octopus)
+    // Dancing: bob tentacles / tail fast. Idle octopus stays lazy.
+    let wagFast = dancing || happy || activity == .fly
+      || (activity == .glide && species != .octopus)
     l.wag = activity == .sleep || angry ? 0 : tick / (wagFast ? 3 : (activity == .glide ? 18 : 12)) % 2
     return l
   }
@@ -1173,7 +1238,7 @@ import AppKit
     grabbing = true
     window.ignoresMouseEvents = false
 
-    // Double-click → disappear (never nap / wake). Menu-bar emoji → Show.
+    // Double-click → quit (reopen from CoPet.app anytime).
     let now = ProcessInfo.processInfo.systemUptime
     if now - pressAt <= NSEvent.doubleClickInterval {
       pressCount += 1
@@ -1187,7 +1252,8 @@ import AppKit
       pendingPetWork?.cancel()
       pendingPetWork = nil
       dragged = false
-      setHidden(true)
+      swallowRelease = true
+      quit()
       return
     }
 
@@ -1246,11 +1312,12 @@ import AppKit
       touchGeneration &+= 1
       pendingPetWork?.cancel()
       pendingPetWork = nil
-      setHidden(true)
+      swallowRelease = true
+      quit()
       return
     }
     if !dragged {
-      // Defer body-touch so a second press can hide instead of petting/waking.
+      // Defer body-touch so a second press can quit instead of petting/waking.
       pendingPetWork?.cancel()
       let part = grabPart
       let gen = touchGeneration
@@ -1317,6 +1384,7 @@ import AppKit
     dancingToSpotify = false
     lastBeatPulse = 0
     danceStretch = false
+    visitPawTicks = 0 // raised tentacle must not stick through a nap
     targetX = nil
     vx = 0
     vy = 0
@@ -1593,8 +1661,9 @@ import AppKit
     visitor = nil
     hostingVisit = true
     visitStartedAt = ProcessInfo.processInfo.systemUptime
-    // Plant yourself so the guest can spawn on your hip.
+    // Plant yourself so the guest can spawn on your hip (same screen, not an edge).
     let vf = screenFrame()
+    x = min(max(x, vf.minX + 100), vf.maxX - 100)
     y = restFloor(in: vf)
     set(.sit, seconds: 5)
     let v = FriendVisitor(
@@ -2032,7 +2101,7 @@ import AppKit
     menu.removeAllItems()
 
     if hidden {
-      menu.addItem(item("Show \(Online.shared.padName)…", #selector(showPet), symbol: "eye"))
+      menu.addItem(item("👀  Show \(Online.shared.padName)", #selector(showPet), symbol: "eye"))
       menu.addItem(.separator())
     }
 
@@ -2255,6 +2324,8 @@ import AppKit
     }
     dance.onTrackChange = { [weak self] track in
       guard let self, dance.enabled, !self.untilWoken, self.activity != .sleep else { return }
+      // New track → new groove on the next downbeat.
+      self.danceGrooveBeatsLeft = 0
       self.say("vibing to \(track.name)", seconds: 2.4, force: false)
     }
     dance.onPlayingChange = { [weak self] playing in
@@ -2279,7 +2350,7 @@ import AppKit
     if dance.enabled { dance.start() }
   }
 
-  /// Pulse on the locked beat grid. Mix of poses + hops — not sit↔stand forever.
+  /// Pulse on the locked beat grid. Calm grooves — no spin/squat/lie spam.
   private func pulseToBeat() {
     guard SpotifyDance.shared.enabled, !hidden, !grabbing, !menuIsOpen else { return }
     guard !untilWoken, activity != .sleep else { return }
@@ -2288,91 +2359,129 @@ import AppKit
     guard now - lastBeatPulse > 0.16 else { return }
     lastBeatPulse = now
     dancingToSpotify = true
-    happyTicks = max(happyTicks, Int(0.45 * fps))
+    happyTicks = max(happyTicks, Int(0.7 * fps))
     danceStep += 1
     let strength = lastBeatStrength
-    let accent = strength >= 0.85 || danceStep % 4 == 1
+    let downbeat = danceStep % 4 == 1
+    let accent = strength >= 0.88 || downbeat
 
-    emit(accent ? "🎵" : (Bool.random() ? "♪" : "🎶"), count: accent ? 2 : 1)
-
-    let floorY = restFloor(in: screenFrame())
-    let grounded = activity != .held && activity != .fall && y <= floorY + 3
+    // Cancel any leftover fall/squash from older dance hops.
+    if activity == .fall {
+      vx = 0
+      vy = 0
+      y = restFloor(in: screenFrame())
+    }
+    squashTicks = 0
     danceStretch = false
-    squashTicks = max(squashTicks, accent ? 9 : 6)
 
-    // Rotating move catalog — different every beat, accents get bigger ones.
-    applyDanceMove(step: danceStep, accent: accent, grounded: grounded)
+    if activity != .held {
+      switch species {
+      case .dog: activity = .run
+      case .bird: activity = .fly
+      case .octopus: activity = .glide
+      }
+      activityTicks = Int(3 * fps)
+    }
 
-    if accent, Int.random(in: 0..<6) == 0 {
-      say(["🎵", "🎶", "♪~"].randomElement()!, seconds: 0.9, force: false)
+    // New groove every 16 beats (~4 bars) on a downbeat — slow change.
+    if danceGrooveBeatsLeft <= 0, downbeat || danceStep == 1 {
+      pickNextDanceGroove()
+      danceGrooveBeatsLeft = 16
+    }
+    danceGrooveBeatsLeft = max(0, danceGrooveBeatsLeft - 1)
+
+    // Legs only on the downbeat — not every hit (that looked like thrashing).
+    if downbeat { walkFrame ^= 1 }
+
+    if downbeat { emit("🎵", count: 1) }
+    else if accent { emit("♪", count: 1) }
+
+    applyDanceGroove(accent: accent, downbeat: downbeat)
+
+    // Always pin dog/octopus to the floor; bird keeps a small hover.
+    let floorY = restFloor(in: screenFrame())
+    switch species {
+    case .bird:
+      if y < floorY + 6 { y = floorY + 8 }
+    case .dog, .octopus:
+      y = floorY
+    }
+
+    // Keep the current standing pose alive between beats.
+    if dancePoseTicks < Int(0.9 * fps) {
+      dancePoseTicks = Int(1.2 * fps)
     }
     render()
   }
 
-  /// Hold a dance pose for a few frames (overrides sit/walk flicker).
-  private func holdDancePose(_ pose: Pose, beats: Double = 0.35) {
-    dancePoseOverride = pose
+  private func pickNextDanceGroove() {
+    let next = (danceGroove + 1) % danceGrooveCount
+    // Face flip only when the groove changes — never every beat.
+    if next != danceGroove { dir = -dir }
+    danceGroove = next
+  }
+
+  private var danceGrooveCount: Int { 4 }
+
+  /// Hold a dance pose (overrides idle). Prefer ≥1 beat so we never flash sit.
+  private func holdDancePose(_ pose: Pose, beats: Double = 0.7) {
+    // Dog: walk only — hang/sit/lie read as squat or flop.
+    let safe: Pose =
+      if species == .dog {
+        if case .walk = pose { pose } else { .walk(walkFrame) }
+      } else {
+        pose
+      }
+    dancePoseOverride = safe
     dancePoseTicks = max(dancePoseTicks, Int(beats * fps))
   }
 
-  private func applyDanceMove(step: Int, accent: Bool, grounded: Bool) {
-    // Species-flavored catalogs so dog isn’t only sit/stand.
-    let moves: [Int] =
-      switch species {
-      case .dog: [0, 1, 2, 3, 4, 5, 6, 7, 1, 8, 2, 4]
-      case .bird: [0, 9, 2, 10, 3, 9, 5, 10]
-      case .octopus: [0, 11, 2, 12, 4, 11, 5, 12]
-      }
-    let move = moves[step % moves.count]
-    walkFrame = step % 2
+  /// Tiny step on the beat — no squash, no physics fall.
+  private func danceStepSide(_ amount: CGFloat) {
+    x += dir * amount
+  }
 
-    switch move {
-    case 0: // bob
-      holdDancePose(.sit, beats: 0.28)
-    case 1: // strut
-      holdDancePose(.walk(walkFrame), beats: 0.4)
-      if accent, grounded { startFall(vx: dir * 1.2, vy: 4.2) }
-    case 2: // spin face
-      dir = -dir
-      holdDancePose(.walk(1), beats: 0.32)
-    case 3: // hop
-      holdDancePose(.hang, beats: 0.25)
-      if grounded { startFall(vx: 0, vy: accent ? 6.2 : 4.5) }
-    case 4: // stretch pose
-      danceStretch = true
-      squashTicks = max(squashTicks, 11)
-      holdDancePose(.sit, beats: 0.45)
-    case 5: // side hop
-      holdDancePose(.walk(0), beats: 0.3)
-      if grounded { startFall(vx: dir * (accent ? 2.4 : 1.5), vy: accent ? 5.5 : 4.0) }
-    case 6: // paw up
-      holdDancePose(.hang, beats: 0.55)
-      if accent { emit("✨") }
-    case 7: // play bow / low
-      holdDancePose(.lie, beats: 0.4)
-      if accent, grounded { startFall(vx: 0, vy: 3.8) }
-    case 8: // double bounce
-      holdDancePose(.walk(1), beats: 0.35)
-      if grounded {
-        startFall(vx: dir * 0.8, vy: 5.8)
+  /// Standing grooves only. Beat = leg step / small slide — not pose spam.
+  private func applyDanceGroove(accent: Bool, downbeat: Bool) {
+    switch species {
+    case .dog:
+      // Always standing walk. Grooves only change *how* we step.
+      holdDancePose(.walk(walkFrame), beats: 1.3)
+      switch danceGroove {
+      case 0: // march in place
+        if downbeat { danceStepSide(0.3) }
+      case 1: // sway step
+        if accent { danceStepSide(downbeat ? 1.2 : 0.5) }
+      case 2: // bigger strut
+        if downbeat { danceStepSide(1.6) }
+        if accent, !downbeat { danceStepSide(0.4) }
+      default: // chill bob — notes only, barely moves
+        if downbeat { danceStepSide(0.2) }
       }
-    case 9: // bird flutter
-      holdDancePose(.walk(walkFrame), beats: 0.35)
-      y = floorAbove(6 + CGFloat(step % 3) * 4)
-      if accent { startFall(vx: dir * 1.4, vy: 5.0) }
-    case 10: // bird hover then drop
-      holdDancePose(.hang, beats: 0.3)
-      y = floorAbove(18)
-      if accent, grounded { startFall(vx: dir * 1.0, vy: 4.8) }
-    case 11: // octopus wave
-      holdDancePose(.hang, beats: 0.5)
-      if accent { emit("🫧") }
-    case 12: // octopus drift step (keep it lazy)
-      holdDancePose(.sit, beats: 0.45)
-      x += dir * (accent ? 1.2 : 0.6)
-      if accent, grounded { startFall(vx: dir * 0.5, vy: 2.2) }
-    default:
-      holdDancePose(.sit, beats: 0.25)
+
+    case .bird:
+      holdDancePose(.walk(walkFrame), beats: 1.3)
+      let base: CGFloat =
+        switch danceGroove {
+        case 0: 10
+        case 1: 16
+        case 2: 12
+        default: 14
+        }
+      y = floorAbove(base + CGFloat(walkFrame) * 3)
+      if accent { danceStepSide(downbeat ? 1.0 : 0.4) }
+      if downbeat, danceGroove == 2 { emit("🪶") }
+
+    case .octopus:
+      // Hang only on rare downbeats of groove 2 — otherwise walk bob.
+      if danceGroove == 2, downbeat {
+        holdDancePose(.hang, beats: 1.0)
+        if accent { emit("🫧") }
+      } else {
+        holdDancePose(.walk(walkFrame), beats: 1.3)
+        if accent { danceStepSide(downbeat ? 1.0 : 0.4) }
+        if downbeat, danceGroove == 1 { emit("🫧") }
+      }
     }
   }
 

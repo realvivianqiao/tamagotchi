@@ -11,6 +11,14 @@ import AppKit
   private var pet: Pet?
   func applicationDidFinishLaunching(_ notification: Notification) { pet = Pet() }
   func applicationWillTerminate(_ notification: Notification) { pet?.save() }
+
+  /// Opening CoPet again while it’s already running (and hidden) brings the pet back.
+  func applicationShouldHandleReopen(
+    _ sender: NSApplication, hasVisibleWindows flag: Bool
+  ) -> Bool {
+    pet?.revealIfHidden()
+    return true
+  }
 }
 
 let args = CommandLine.arguments

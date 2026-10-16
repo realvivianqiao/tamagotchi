@@ -22,6 +22,10 @@ import AppKit
   /// Locked Y (or X) for the current axis-locked bout.
   private var wanderLock: CGFloat?
   private var targetX: CGFloat?
+  /// How many times we've bounced this fall (caps so they settle).
+  private var bounceCount = 0
+  /// Brief squash after a bounce hit (drawn in PetView).
+  private(set) var squashTicks = 0
   private var tick = 0, walkFrame = 0, happyTicks = 0, angryTicks = 0, blinkTicks = 0, bubbleTicks = 0
   private var recentSays: [String] = []
   private var greeted = false
@@ -327,9 +331,23 @@ import AppKit
       if species == .bird { vx *= 0.98 }
       x += vx
       y += vy
-      if y <= restFloor(in: vf) {
-        y = restFloor(in: vf)
-        land(impact: vy)
+      let floor = restFloor(in: vf)
+      if y <= floor {
+        y = floor
+        // Bounce when dropped from height — reverse + damp so it settles in a few hops.
+        let bounceThresh: CGFloat = species == .bird ? -5 : -4
+        if vy < bounceThresh, bounceCount < 3 {
+          bounceCount += 1
+          let damp: CGFloat = species == .bird ? 0.42 : 0.58
+          vy = -vy * damp
+          // Keep a little upward pop so tall drops feel bouncy.
+          if bounceCount == 1 { vy = max(vy, species == .bird ? 5 : 7) }
+          vx *= 0.65
+          squashTicks = 8
+          if bounceCount == 1 { emit("💨") }
+        } else {
+          land(impact: vy)
+        }
       }
     case .sleep:
       y = sleepFloor(in: vf)
@@ -413,6 +431,7 @@ import AppKit
     let flapFast = activity == .run || activity == .fly
     // Slower leg cycle when walking so it matches the chill pace.
     if tick % (flapFast ? 7 : 14) == 0 { walkFrame ^= 1 }
+    if squashTicks > 0 { squashTicks -= 1 }
     happyTicks = max(0, happyTicks - 1)
     angryTicks = max(0, angryTicks - 1)
     if blinkTicks > 0 { blinkTicks -= 1 } else if Int.random(in: 0..<150) == 0 { blinkTicks = 4 }
@@ -512,6 +531,7 @@ import AppKit
     }
     self.vx = vx
     self.vy = vy
+    bounceCount = 0
     activity = .fall
   }
 
@@ -523,6 +543,8 @@ import AppKit
   private func land(impact: CGFloat) {
     vx = 0
     vy = 0
+    bounceCount = 0
+    if impact < -6 { squashTicks = max(squashTicks, 6) }
     let vf = screenFrame()
     if untilWoken {
       activity = .sleep

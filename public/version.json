@@ -1,6 +1,6 @@
 {
-  "version": "0.5.2",
+  "version": "0.5.3",
   "url": "/CoPet.zip",
-  "notes": "Pets move on one axis per bout (no zigzag) so they are easier to grab.",
-  "publishedAt": "2026-10-16T02:16:25Z"
+  "notes": "Pets bounce (with squash) when dropped from height.",
+  "publishedAt": "2026-10-16T02:19:52Z"
 }

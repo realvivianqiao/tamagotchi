@@ -20,6 +20,15 @@ import AppKit
     let rect = CGRect(origin: spriteOrigin, size: spriteSize)
     ctx.saveGState()
     ctx.interpolationQuality = .none
+    // Landing squash: briefly flatter + wider so bounces read as animation.
+    if pet.squashTicks > 0 {
+      let t = CGFloat(pet.squashTicks) / 8
+      let sy = 1 - 0.22 * t
+      let sx = 1 + 0.18 * t
+      ctx.translateBy(x: rect.midX, y: rect.minY)
+      ctx.scaleBy(x: sx, y: sy)
+      ctx.translateBy(x: -rect.midX, y: -rect.minY)
+    }
     if pet.dir < 0 {
       ctx.translateBy(x: rect.midX, y: 0)
       ctx.scaleBy(x: -1, y: 1)

@@ -1,6 +1,6 @@
 {
-  "version": "0.5.29",
+  "version": "0.5.30",
   "url": "/CoPet.zip",
-  "notes": "Dance and other actions wake from nap automatically.",
-  "publishedAt": "2026-10-16T04:07:54Z"
+  "notes": "Friend poke visits are a ~2s single boop, then gone.",
+  "publishedAt": "2026-10-16T04:11:01Z"
 }

@@ -1220,6 +1220,13 @@ import AppKit
           self.happiness = min(100, self.happiness + 12)
           self.happyTicks = Int(2.5 * fps)
           self.hop()
+        } else if action == "poke" {
+          // Quick boop reaction — not the long mad sprint.
+          if self.untilWoken || self.activity == .sleep { self.wakeStickyNap() }
+          self.happiness = max(0, self.happiness - 8)
+          self.angryTicks = Int(0.9 * fps)
+          self.emit("💢", count: 2)
+          self.hop()
         } else {
           self.playRemote(action)
         }
@@ -1239,9 +1246,10 @@ import AppKit
         self.visitor = nil
       }
     }
-    // Belt-and-suspenders: force-dismiss if anything stalls past 5s.
+    // Belt-and-suspenders: force-dismiss if a visit stalls.
     let visitCode = code
-    DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+    let forceAfter: TimeInterval = action == "poke" ? 2.2 : 5.0
+    DispatchQueue.main.asyncAfter(deadline: .now() + forceAfter) { [weak self] in
       guard let self, self.visitor?.code == visitCode || self.hostingVisit else { return }
       self.hostingVisit = false
       self.visitStartedAt = 0
@@ -1250,7 +1258,7 @@ import AppKit
       self.bubble = nil
       self.bubbleTicks = 0
     }
-    say(label, seconds: 0.9)
+    say(label, seconds: action == "poke" ? 0.55 : 0.9)
   }
 
   private func performHostSideVisit(action: String) {

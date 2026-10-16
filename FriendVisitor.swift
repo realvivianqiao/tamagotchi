@@ -150,8 +150,9 @@ import AppKit
     onVisitDone = onDone
     untilWoken = false
     showNameplate = true
-    visitDeadline = Date().addingTimeInterval(visitMaxSeconds)
-    say(label, seconds: 0.9)
+    let maxSec: TimeInterval = visitAction == "poke" ? 2.0 : visitMaxSeconds
+    visitDeadline = Date().addingTimeInterval(maxSec)
+    say(label, seconds: visitAction == "poke" ? 0.55 : 0.9)
     startTimer()
     snapBesideHost()
     render()
@@ -311,17 +312,19 @@ import AppKit
         bubble = nil
         bubbleTicks = 0
         dir = visitSide
+        let leaveSec = visitAction == "poke" ? 0.25 : 0.5
         switch species {
-        case .dog: set(.run, seconds: 0.5)
-        case .bird: set(.fly, seconds: 0.5)
-        case .octopus: set(.glide, seconds: 0.5)
+        case .dog: set(.run, seconds: leaveSec)
+        case .bird: set(.fly, seconds: leaveSec)
+        case .octopus: set(.glide, seconds: leaveSec)
         }
       }
 
-    default: // tiny step away, then gone (~0.45s)
-      x += visitSide * 8
+    default: // tiny step away, then gone
+      let leaveTicks = visitAction == "poke" ? Int(0.28 * fps) : Int(0.45 * fps)
+      x += visitSide * (visitAction == "poke" ? 12 : 8)
       if species == .bird { y += 1.6 }
-      if visitTicks > Int(0.45 * fps) {
+      if visitTicks > leaveTicks {
         finishVisit()
         return
       }
@@ -331,6 +334,7 @@ import AppKit
   /// Gesture only — total visit stays under visitMaxSeconds with leave.
   private var visitGestureDuration: Int {
     switch visitAction {
+    case "poke": return Int(0.7 * fps) // one quick boop
     case "play": return Int(2.4 * fps)
     case "nap": return Int(2.0 * fps)
     default: return Int(2.2 * fps)
@@ -361,18 +365,15 @@ import AppKit
         emit("❤️", count: 3)
       }
     case "poke":
-      angryTicks = Int(2.2 * fps)
+      // One boop — in and out in ~2s total.
+      angryTicks = Int(0.9 * fps)
       happyTicks = 0
-      emit("💢", count: 5)
+      emit("💢", count: 2)
+      hop()
       switch species {
-      case .dog:
-        set(.run, seconds: 2)
-        hop()
-      case .bird:
-        set(.fly, seconds: 2)
-      case .octopus:
-        set(.glide, seconds: 2)
-        emit("🖤", count: 2)
+      case .dog: set(.sit, seconds: 0.7)
+      case .bird: set(.fly, seconds: 0.7)
+      case .octopus: set(.glide, seconds: 0.7)
       }
     case "feed":
       set(.eat, seconds: 2.4)
@@ -437,10 +438,8 @@ import AppKit
         emit(species == .dog ? "💨" : (species == .bird ? "✨" : "🫧"))
       }
     case "poke":
-      if visitTicks % 8 == 0 {
-        emit("💢", count: 2)
-        hop()
-      }
+      // Single poke already fired in startVisitGesture — don’t keep bouncing.
+      break
     case "feed":
       if visitTicks % 10 == 0 {
         switch species {

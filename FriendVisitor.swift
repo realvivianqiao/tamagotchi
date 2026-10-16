@@ -196,8 +196,18 @@ import AppKit
   func play(_ action: String) {
     if isVisiting { return }
     switch action {
+    case "feed":
+      set(.eat, seconds: 3)
+      emit(Self.foodEmoji(species))
+      sayFresh(PetLines.feed(species, secondBreakfast: false))
     case "play":
       signaturePlay(seconds: 5)
+    case "pet":
+      happyTicks = Int(2.5 * fps)
+      angryTicks = 0
+      emit("❤️", count: 3)
+      sayFresh(PetLines.pet(species))
+      if activity != .sleep { hop() }
     case "poke":
       untilWoken = false
       happyTicks = 0
@@ -205,12 +215,6 @@ import AppKit
       signaturePlayAngry(seconds: 2.5)
       emit("💢", count: 3)
       sayFresh(PetLines.poke(species))
-    case "talk":
-      happyTicks = Int(3 * fps)
-      angryTicks = 0
-      set(.sit, seconds: 3.2)
-      emit("💬", count: 2)
-      sayFresh(PetLines.talk(species))
     default:
       break
     }
@@ -332,7 +336,7 @@ import AppKit
     switch visitAction {
     case "poke": return Int(2.8 * fps)
     case "play": return Int(5.0 * fps)
-    case "talk": return Int(4.2 * fps)
+    case "feed", "pet": return Int(4.5 * fps)
     default: return Int(4.0 * fps)
     }
   }
@@ -367,14 +371,34 @@ import AppKit
         playKickoffSent = true
         onPlayWithHost?()
       }
-    case "talk":
+    case "pet":
       happyTicks = Int(hold * fps)
       angryTicks = 0
-      set(.sit, seconds: hold)
-      emit("💬", count: 2)
-      sayFresh(PetLines.talk(species))
-      if species == .bird { y = hy + 16 }
-      else if species == .octopus { y = max(NSScreen.main!.visibleFrame.minY + 12, hy) }
+      let receiving = visitRole == .outgoingTarget
+      if receiving {
+        set(.sit, seconds: hold)
+        emit("❤️", count: 3)
+      } else {
+        set(.sit, seconds: hold)
+        pawTicks = Int(hold * fps)
+        emit("❤️", count: 3)
+        if species == .bird {
+          set(.fly, seconds: hold)
+          y = hy + 26
+        }
+      }
+    case "feed":
+      let receiving = visitRole == .outgoingTarget
+      if receiving {
+        set(.eat, seconds: hold)
+        happyTicks = Int(hold * fps)
+        emit(Self.foodEmoji(species), count: 3)
+      } else {
+        let forHost = hostSpecies?() ?? .dog
+        happyTicks = Int(hold * fps)
+        set(.sit, seconds: hold)
+        offerFoodTowardHost(Self.foodEmoji(forHost), count: 3)
+      }
     default:
       set(.sit, seconds: hold)
     }
@@ -426,19 +450,29 @@ import AppKit
         if visitTicks % 15 == 0 { emit("🎾") }
       }
 
-    case "talk":
-      // Face-to-face chat — sit still, chatter bubbles.
+    case "pet":
       x = hx + visitSide * visitGap
       if species == .bird {
-        y = hy + 16 + CGFloat(sin(Double(visitTicks) / 8)) * 3
+        y = hy + 18 + CGFloat(sin(Double(visitTicks) / 6)) * 4
+        if visitTicks % 14 == 0 { emit("❤️") }
       } else if species == .octopus {
-        y = max(floor + 12, hy + CGFloat(sin(Double(visitTicks) / 10)) * 2)
+        y = max(floor + 12, hy + CGFloat(sin(Double(visitTicks) / 8)) * 3)
+        if visitTicks % 16 == 0 { emit("🫧"); emit("❤️") }
       } else {
-        y = floor
+        y = floor + (visitTicks / 10 % 2 == 0 ? 3 : 0)
+        if visitTicks % 16 == 0 { emit("❤️", count: 2) }
       }
-      if visitTicks % 22 == 0 { emit("💬") }
-      if visitTicks == Int(1.2 * fps) || visitTicks == Int(2.6 * fps) {
-        sayFresh(PetLines.talk(species))
+    case "feed":
+      x = hx + visitSide * visitGap
+      let receiving = visitRole == .outgoingTarget
+      if receiving {
+        y = species == .bird ? hy + 10 : (species == .octopus ? max(floor + 12, hy) : floor)
+        if visitTicks % 14 == 0 { emit(Self.foodEmoji(species)) }
+      } else {
+        y = species == .bird ? hy + 14 : (species == .octopus ? max(floor + 12, hy) : floor)
+        if visitTicks % 16 == 0 {
+          offerFoodTowardHost(Self.foodEmoji(hostSpecies?() ?? species), count: 1)
+        }
       }
     default:
       break

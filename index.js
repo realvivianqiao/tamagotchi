@@ -32,7 +32,7 @@ function binding(evt) {
   logBindingEvent(evt).catch(() => {});
 }
 
-const CARE_ACTIONS = new Set(["play", "poke", "talk"]);
+const CARE_ACTIONS = new Set(["feed", "play", "pet", "poke"]);
 
 /** Tally directed care (Vivian poked Evars / Evars poked Vivian) in mochi_friend_actions. */
 function friendAction(evt) {

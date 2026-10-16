@@ -11,7 +11,7 @@ struct FriendBond: Codable, Equatable {
   var lastActivity: String?
   /// Friend's chosen pet species raw value (dog/cat/bunny/fox/panda).
   var species: String
-  /// Care actions you sent them (poke / play / talk).
+  /// Care actions you sent them (poke / feed / play / pet).
   var sentCount: Int
   /// Care actions they sent you.
   var recvCount: Int
@@ -433,7 +433,7 @@ struct FriendBond: Codable, Equatable {
         onBondAlert?(
           again
             ? "Reconnected with \(host)!"
-            : "Bonded with \(host)! 🎉\nThey’re in your Friends list — poke, play, or talk from there.",
+            : "Bonded with \(host)! 🎉\nThey’re in your Friends list — poke, feed, play, or pat from there.",
           true)
         track("claim_ok", code: pair, targetName: host, payload: ["shareCode": token])
       } catch {
@@ -1090,7 +1090,7 @@ struct FriendBond: Codable, Equatable {
       let cleanAction: String? = {
         guard let action else { return nil }
         let a = action.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard ["play", "poke", "talk"].contains(a) else { return nil }
+        guard ["feed", "play", "pet", "poke"].contains(a) else { return nil }
         return a
       }()
       onSync?(f, h, cleanAction, from, code, fromSpecies)

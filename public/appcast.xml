@@ -7,15 +7,15 @@
     <language>en</language>
     <item>
       <title>CoPet 0.5.38</title>
-      <pubDate>2026-10-16T14:40:03Z</pubDate>
+      <pubDate>2026-10-16T15:05:22Z</pubDate>
       <sparkle:version>49</sparkle:version>
       <sparkle:shortVersionString>0.5.38</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-      <description><![CDATA[Double-click hides the pet (not nap). Bring back from the menu-bar emoji.]]></description>
+      <description><![CDATA[Improvements and fixes.]]></description>
       <enclosure
         url="https://tamagotchi-udtz.onrender.com/CoPet.zip"
-        sparkle:edSignature="fXgAdNRvIkCri6+hzRKMofKWH7vrxXtP/7tx3fIPJerGm9VtqfL3O5HYIqrqCphdJ8gB6Pbt3K6F81TTFqn0Bw=="
-        length="1755109"
+        sparkle:edSignature="EoTO18mYOyHaHi9j932O9l9O2pnUB1vi9lQa+PWd2XQofKDJIwrZAVzGMAYEx/PuvXeToWnKXwptNGgRDvT2Dw=="
+        length="1757228"
         type="application/octet-stream" />
     </item>
   </channel>

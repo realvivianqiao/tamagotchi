@@ -1,15 +1,15 @@
 # CoPet
 
-A tiny Mac desktop pet. Download, invite someone, feed/pet/play — they see it live.
+A tiny Mac desktop pet. Download, share one code, feed/play/pat — friends see it live.
 
 **Site + download:** https://tamagotchi-udtz.onrender.com
 
 ## How it works
 1. Download CoPet from the site
 2. Open the app — you have a pet
-3. Menu → **Invite friend…** (copies a code)
-4. They download → **Claim invite…** → paste code
-5. Bonded. Actions sync both ways.
+3. Menu → **Bonds… → Share my code…** — one permanent 6-character code for this Mac (paste in a group chat; everyone can use it)
+4. Friends → **Bonds… → Accept a code…** → paste yours
+5. Bonded. Care / Friends actions sync both ways.
 
 ## Gatekeeper
 The zip is **ad-hoc signed** (not Apple Developer ID). Friends may see “Apple could not verify CoPet” — **System Settings → Privacy & Security → Open Anyway**, or right-click → Open. Work laptops may still need IT. Wider sharing needs a paid Apple developer account + notarization.

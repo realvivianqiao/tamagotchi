@@ -320,7 +320,7 @@ export async function getPlayer(deviceId) {
   return data;
 }
 
-const CARE_ACTIONS = new Set(["play", "poke", "talk"]);
+const CARE_ACTIONS = new Set(["feed", "play", "pet", "poke"]);
 
 /**
  * Increment directed friendship tallies (e.g. Vivian → Evars · poke).

@@ -51,7 +51,7 @@ enum PetLines {
     if secondBreakfast {
       switch species {
       case .dog:
-        [
+        return [
           "still hungry?? ok… 🍖", "second breakfast!!", "don't mind if i do",
           "more?? yes", "snack 2: electric boogaloo", "nom again",
           "never full honestly", "bonus treat!!", "chef's kiss", "ok one more…",
@@ -62,7 +62,7 @@ enum PetLines {
           "more bowl energy", "yes yes yes", "snack attack 2", "full…ish 🍖",
         ]
       case .bird:
-        [
+        return [
           "more seeds!!", "second helping!!", "SEED AGAIN", "peck peck II",
           "berry encore", "never enough seeds", "crunch 2", "yes more!!",
           "tiny tummy lies", "refill the feeder", "nom seed", "happy beak",
@@ -73,7 +73,7 @@ enum PetLines {
           "berry bonus", "seed overflow!!",
         ]
       case .octopus:
-        [
+        return [
           "second snack 🦀", "more crab??", "encore bloop", "snack tide rising",
           "still snacky", "crab 2", "bubble feast II", "yes more",
           "arms need calories", "gurgle (happy)", "reef buffet", "again please",

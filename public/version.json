@@ -1,6 +1,6 @@
 {
-  "version": "0.5.32",
+  "version": "0.5.33",
   "url": "/CoPet.zip",
-  "notes": "Friend feed/pet use giver vs eater roles; food matches their species. Dance stays self-only.",
-  "publishedAt": "2026-10-16T04:15:51Z"
+  "notes": "Clean up the top of the menu \u2014 no checkmark clutter or greyed-out stats.",
+  "publishedAt": "2026-10-16T04:18:04Z"
 }

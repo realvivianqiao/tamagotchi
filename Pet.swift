@@ -1577,13 +1577,11 @@ import AppKit
   func menuNeedsUpdate(_ menu: NSMenu) {
     menu.removeAllItems()
 
-    // --- This pad (what's on your desktop) ---
+    // --- This pad: identity → pet → presence → stats (no checkmarks / no grey mush) ---
     menu.addItem(item("My username / pad…", #selector(onlineSetName), symbol: "pencil"))
     if !hidden {
-      let speciesItem = NSMenuItem(
-        title: "🐾  Choose pet…  (\(species.emoji) \(species.defaultName))",
-        action: nil,
-        keyEquivalent: "")
+      let speciesItem = NSMenuItem(title: "Choose pet…", action: nil, keyEquivalent: "")
+      speciesItem.image = menuSymbol("pawprint")
       let speciesMenu = NSMenu()
       for sp in Species.allCases {
         let row = NSMenuItem(
@@ -1598,14 +1596,12 @@ import AppKit
       speciesItem.submenu = speciesMenu
       menu.addItem(speciesItem)
     }
-    let presence = item(
-      Online.shared.appearOnline ? "🟢  Online" : "⚪️  Offline",
-      #selector(toggleAppearOnline))
-    if Online.shared.appearOnline { presence.state = .on }
-    menu.addItem(presence)
-    menu.addItem(info(petName))
-    menu.addItem(info("Fullness   \(bar(fullness))"))
-    menu.addItem(info("Happiness  \(bar(happiness))"))
+    menu.addItem(item(
+      Online.shared.appearOnline ? "Status: Online 🟢" : "Status: Offline ⚪️",
+      #selector(toggleAppearOnline)))
+    menu.addItem(headerLine("\(species.emoji)  \(petName)"))
+    menu.addItem(headerLine("Fullness   \(bar(fullness))"))
+    menu.addItem(headerLine("Happiness  \(bar(happiness))"))
 
     if !hidden {
       menu.addItem(.separator())
@@ -1616,7 +1612,6 @@ import AppKit
       let danceItem = item(
         SpotifyDance.shared.enabled ? "🎵  Stop dance" : "🎵  Dance to Spotify",
         #selector(toggleDanceToSpotify))
-      if SpotifyDance.shared.enabled { danceItem.state = .on }
       if !SpotifyDance.shared.isAvailable { danceItem.isEnabled = false }
       menu.addItem(danceItem)
       menu.addItem(item(isAsleep ? "☀️  Wake up" : "💤  Nap", #selector(toggleNap)))
@@ -1836,8 +1831,20 @@ import AppKit
   }
 
   private func info(_ title: String) -> NSMenuItem {
+    headerLine(title, secondary: true)
+  }
+
+  /// Non-clickable menu text that still reads clearly (not system-disabled grey).
+  private func headerLine(_ title: String, secondary: Bool = false) -> NSMenuItem {
     let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
     item.isEnabled = false
+    let color: NSColor = secondary ? .secondaryLabelColor : .labelColor
+    item.attributedTitle = NSAttributedString(
+      string: title,
+      attributes: [
+        .font: NSFont.menuFont(ofSize: 0),
+        .foregroundColor: color,
+      ])
     return item
   }
 

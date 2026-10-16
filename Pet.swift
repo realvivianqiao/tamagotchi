@@ -1549,36 +1549,14 @@ import AppKit
 
   func menuNeedsUpdate(_ menu: NSMenu) {
     menu.removeAllItems()
+
+    // --- This pad (what's on your desktop) ---
     menu.addItem(item("My username / pad…", #selector(onlineSetName), symbol: "pencil"))
     if !hidden {
-      menu.addItem(info(petName))
-    }
-    let presence = item(
-      Online.shared.appearOnline ? "🟢  Online" : "⚪️  Offline",
-      #selector(toggleAppearOnline))
-    if Online.shared.appearOnline { presence.state = .on }
-    menu.addItem(presence)
-    menu.addItem(info("Fullness   \(bar(fullness))"))
-    menu.addItem(info("Happiness  \(bar(happiness))"))
-
-    let friends = Online.shared.friends
-    let onlineN = friends.filter { $0.online && !$0.waiting }.count
-    menu.addItem(info("Friends    \(friends.count) · \(onlineN) online"))
-    menu.addItem(.separator())
-
-    if !hidden {
-      menu.addItem(item("💢  Poke", #selector(pokeSelf)))
-      menu.addItem(item("🍖  Feed", #selector(feed)))
-      menu.addItem(item("🎾  Play", #selector(play)))
-      menu.addItem(item("❤️  Pet", #selector(petFromMenu)))
-      let danceItem = item(
-        SpotifyDance.shared.enabled ? "🎵  Stop dance" : "🎵  Dance to Spotify",
-        #selector(toggleDanceToSpotify))
-      if SpotifyDance.shared.enabled { danceItem.state = .on }
-      if !SpotifyDance.shared.isAvailable { danceItem.isEnabled = false }
-      menu.addItem(danceItem)
-      menu.addItem(item(isAsleep ? "☀️  Wake up" : "💤  Nap", #selector(toggleNap)))
-      let speciesItem = NSMenuItem(title: "🐾  Choose pet…", action: nil, keyEquivalent: "")
+      let speciesItem = NSMenuItem(
+        title: "🐾  Choose pet…  (\(species.emoji) \(species.defaultName))",
+        action: nil,
+        keyEquivalent: "")
       let speciesMenu = NSMenu()
       for sp in Species.allCases {
         let row = NSMenuItem(
@@ -1592,16 +1570,42 @@ import AppKit
       }
       speciesItem.submenu = speciesMenu
       menu.addItem(speciesItem)
+    }
+    let presence = item(
+      Online.shared.appearOnline ? "🟢  Online" : "⚪️  Offline",
+      #selector(toggleAppearOnline))
+    if Online.shared.appearOnline { presence.state = .on }
+    menu.addItem(presence)
+    menu.addItem(info(petName))
+    menu.addItem(info("Fullness   \(bar(fullness))"))
+    menu.addItem(info("Happiness  \(bar(happiness))"))
+
+    if !hidden {
       menu.addItem(.separator())
+      menu.addItem(item("💢  Poke", #selector(pokeSelf)))
+      menu.addItem(item("🍖  Feed", #selector(feed)))
+      menu.addItem(item("🎾  Play", #selector(play)))
+      menu.addItem(item("❤️  Pet", #selector(petFromMenu)))
+      let danceItem = item(
+        SpotifyDance.shared.enabled ? "🎵  Stop dance" : "🎵  Dance to Spotify",
+        #selector(toggleDanceToSpotify))
+      if SpotifyDance.shared.enabled { danceItem.state = .on }
+      if !SpotifyDance.shared.isAvailable { danceItem.isEnabled = false }
+      menu.addItem(danceItem)
+      menu.addItem(item(isAsleep ? "☀️  Wake up" : "💤  Nap", #selector(toggleNap)))
     }
 
+    // --- Friends & bonds ---
+    menu.addItem(.separator())
+    let friends = Online.shared.friends
+    let onlineN = friends.filter { $0.online && !$0.waiting }.count
     let friendsItem = NSMenuItem(
-      title: "Friends (\(friends.count))",
+      title: "Friends (\(friends.count) · \(onlineN) online)",
       action: nil,
       keyEquivalent: "")
     let sub = NSMenu()
     if friends.isEmpty {
-      sub.addItem(info("No friends yet — Invite or Claim"))
+      sub.addItem(info("No friends yet — Invite or Claim under Bonds"))
     } else {
       for f in friends {
         let mark = f.waiting ? "⏳" : (f.online ? "🟢" : "⚪️")
@@ -1659,7 +1663,10 @@ import AppKit
     }
     bondsItem.submenu = bondsMenu
     menu.addItem(bondsItem)
+
     menu.addItem(item("Check for updates…", #selector(checkForUpdates), symbol: "arrow.triangle.2.circlepath"))
+
+    // --- Quit alone ---
     menu.addItem(.separator())
     menu.addItem(item("Quit", #selector(quit), symbol: "xmark.circle"))
   }

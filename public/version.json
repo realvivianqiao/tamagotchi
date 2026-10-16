@@ -1,6 +1,6 @@
 {
-  "version": "0.5.27",
+  "version": "0.5.28",
   "url": "/CoPet.zip",
-  "notes": "Add Online/Offline toggle at the top of the menu.",
-  "publishedAt": "2026-10-16T04:03:54Z"
+  "notes": "Reorganize menu: this pad on top, then friends/bonds, quit alone.",
+  "publishedAt": "2026-10-16T04:05:43Z"
 }

@@ -61,6 +61,7 @@ export async function loadBondsFromSupabase() {
       guestName: row.guest_name,
       hostDeviceId: row.host_device_id,
       guestDeviceId: row.guest_device_id,
+      personalHub: Boolean(row.personal_hub),
       fullness: row.fullness ?? 80,
       happiness: row.happiness ?? 80,
       createdAt: row.created_at ? Date.parse(row.created_at) : Date.now(),
@@ -78,6 +79,7 @@ export async function saveBondToSupabase(code, inv) {
     guest_name: inv.guestName ?? null,
     host_device_id: inv.hostDeviceId ?? null,
     guest_device_id: inv.guestDeviceId ?? null,
+    personal_hub: Boolean(inv.personalHub),
     fullness: inv.fullness ?? 80,
     happiness: inv.happiness ?? 80,
     created_at: inv.createdAt ? new Date(inv.createdAt).toISOString() : new Date().toISOString(),
@@ -86,6 +88,36 @@ export async function saveBondToSupabase(code, inv) {
   };
   const { error } = await supabase.from("mochi_bonds").upsert(row, { onConflict: "code" });
   if (error) console.warn("supabase save bond:", error.message);
+}
+
+/** Append a friend row onto a player's cloud friends list (host learns about new claims). */
+export async function appendFriendToPlayer(deviceId, friend) {
+  if (!supabase || !deviceId || !friend?.code) return;
+  const row = await getPlayer(deviceId);
+  if (!row) return;
+  const friends = Array.isArray(row.friends) ? [...row.friends] : [];
+  if (friends.some((f) => String(f.code || "").toUpperCase() === String(friend.code).toUpperCase())) {
+    return;
+  }
+  friends.push({
+    code: String(friend.code).toUpperCase().slice(0, 6),
+    partnerName: String(friend.partnerName || "friend").slice(0, 24),
+    online: false,
+    waiting: false,
+    fullness: Number(friend.fullness) || 80,
+    happiness: Number(friend.happiness) || 80,
+    lastActivity: friend.lastActivity ? String(friend.lastActivity).slice(0, 80) : "new bond",
+    species: String(friend.species || "dog").slice(0, 12),
+  });
+  await upsertPlayer({
+    deviceId,
+    displayName: row.display_name,
+    species: row.species,
+    fullness: row.fullness,
+    happiness: row.happiness,
+    friends,
+    activeCode: row.active_code,
+  });
 }
 
 /** When a device renames, keep bond host/guest names in sync. */

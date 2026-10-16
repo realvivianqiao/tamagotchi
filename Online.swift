@@ -170,48 +170,53 @@ struct FriendBond: Codable, Equatable {
     return friends.first { $0.code == activeCode } ?? friends.first
   }
 
+  /// Permanent group-chat share code for this Mac (created once, reused forever).
+  var shareCode: String? {
+    get {
+      let c = UserDefaults.standard.string(forKey: "mochiShareCode")?
+        .trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+      return (c?.count == 6) ? c : nil
+    }
+    set { UserDefaults.standard.set(newValue, forKey: "mochiShareCode") }
+  }
+
   // MARK: - Public API
 
-  func create(fullness: Double, happiness: Double) {
-    onStatus?("creating invite…")
+  /// Ensure / refresh your standing share-code (same code every time — paste in a group chat).
+  func shareMyCode(fullness: Double, happiness: Double, completion: ((String?) -> Void)? = nil) {
+    onStatus?("getting your code…")
     Task { @MainActor in
       do {
-        let res = try await postJSON(path: "/api/invite", body: [
+        var body: [String: Any] = [
           "name": displayName,
           "deviceId": deviceId,
           "fullness": fullness,
           "happiness": happiness,
-        ])
+          "personal": true,
+        ]
+        if let shareCode { body["code"] = shareCode }
+        let res = try await postJSON(path: "/api/invite", body: body)
         guard let c = res["code"] as? String else {
-          onStatus?("invite failed")
+          onStatus?("couldn’t get share code")
+          completion?(nil)
           return
         }
-        // Bond once: if this code was already claimed, just reopen that friend row.
-        if let guest = res["guestName"] as? String, !guest.isEmpty, res["bonded"] as? Bool == true {
-          upsert(FriendBond(
-            code: c, partnerName: guest, online: false, waiting: false,
-            fullness: fullness, happiness: happiness, lastActivity: "already bonded"))
-          activeCode = c
-          saveFriends()
-          onStatus?("bonded with \(guest)")
-          onFriendsChanged?()
-          ensureSocket()
-          attach(code: c)
-          return
-        }
-        upsert(FriendBond(
-          code: c, partnerName: "waiting…", online: false, waiting: true,
-          fullness: fullness, happiness: happiness, lastActivity: "invite sent"))
-        activeCode = c
-        saveFriends()
-        onStatus?("waiting · code \(c)")
-        onFriendsChanged?()
+        shareCode = c
         ensureSocket()
-        attach(code: c)
+        send(["type": "hello", "deviceId": deviceId, "name": displayName])
+        onStatus?("your code · \(c)")
+        onFriendsChanged?()
+        completion?(c)
       } catch {
-        onStatus?("invite failed: \(error.localizedDescription)")
+        onStatus?("share failed: \(error.localizedDescription)")
+        completion?(nil)
       }
     }
+  }
+
+  func create(fullness: Double, happiness: Double) {
+    // Back-compat: old “invite” now means share your permanent code.
+    shareMyCode(fullness: fullness, happiness: happiness)
   }
 
   func join(code raw: String) {
@@ -231,6 +236,7 @@ struct FriendBond: Codable, Equatable {
           "name": displayName,
           "deviceId": deviceId,
           "code": token,
+          "species": mySpecies.rawValue,
         ])
         if let err = res["error"] as? String {
           onStatus?(err)
@@ -322,6 +328,12 @@ struct FriendBond: Codable, Equatable {
       await cloudPull()
       // Always register this device pad in the DB, even with an empty friends list.
       cloudPush(fullness: nil, happiness: nil)
+      ensureSocket()
+      send(["type": "hello", "deviceId": deviceId, "name": displayName])
+      // Keep your standing share-code alive across Render sleeps.
+      if shareCode != nil || !friends.isEmpty {
+        shareMyCode(fullness: 80, happiness: 80)
+      }
       guard !friends.isEmpty else {
         onStatus?("pad ready")
         return
@@ -329,7 +341,6 @@ struct FriendBond: Codable, Equatable {
       if activeCode == nil { activeCode = friends.first?.code }
       onFriendsChanged?()
       onPresence?()
-      ensureSocket()
       for f in friends { attach(code: f.code) }
     }
   }
@@ -588,6 +599,23 @@ struct FriendBond: Codable, Equatable {
       applyRoom(json)
     case "presence":
       applyPresence(json)
+    case "bond":
+      // Someone claimed your standing share-code — add them as a friend.
+      guard let code = json["code"] as? String, !code.isEmpty else { break }
+      let partner = (json["partnerName"] as? String) ?? "friend"
+      let f = Self.num(json, "fullness") ?? 80
+      let h = Self.num(json, "happiness") ?? 80
+      let sp = (json["species"] as? String) ?? Species.dog.rawValue
+      upsert(FriendBond(
+        code: code, partnerName: partner, online: false, waiting: false,
+        fullness: f, happiness: h, lastActivity: "just bonded", species: sp))
+      if activeCode == nil { activeCode = code }
+      saveFriends()
+      onStatus?("bonded with \(partner)")
+      onFriendsChanged?()
+      onPresence?()
+      attach(code: code)
+
     case "rename":
       // Partner changed their pet name — update local friend row + cloud.
       let code = json["code"] as? String

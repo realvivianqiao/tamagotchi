@@ -1046,15 +1046,12 @@ import AppKit
     NSApp.terminate(nil)
   }
 
-  // MARK: Online — invite / claim
+  // MARK: Online — bonds
 
-  @objc private func onlineInvite() {
+  @objc private func onlineShareCode() {
     ensureDisplayName()
-    Online.shared.create(fullness: fullness, happiness: happiness)
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+    Online.shared.shareMyCode(fullness: fullness, happiness: happiness) { [weak self] code in
       guard let self else { return }
-      let code = Online.shared.activeCode
-        ?? Online.shared.friends.first(where: { $0.waiting })?.code
       guard let code else {
         self.alert("Couldn’t reach the server.\nCheck your internet and try again.")
         return
@@ -1064,18 +1061,23 @@ import AppKit
       CoPet code \(code)
 
       1) download \(site)
-      2) 🐶 → Claim invite → paste \(code)
+      2) menu → Bonds → Accept a code → paste \(code)
+
+      Same code forever — share it in a group chat and anyone can find me.
       """
       NSPasteboard.general.clearContents()
       NSPasteboard.general.setString(msg, forType: .string)
-      self.onlineNote = "waiting · code \(code)"
-      self.alert("Invite copied.\n\nYour code is \(code) — send it to your friend now.")
+      self.onlineNote = "your code · \(code)"
+      self.alert("Code copied.\n\nYour code is \(code) — it stays the same, so you can paste it in a group chat.")
     }
   }
 
   @objc private func onlineClaim() {
     ensureDisplayName()
-    let code = prompt("Claim invite", message: "Paste just the 6-letter code (or the whole invite text)", placeholder: "")
+    let code = prompt(
+      "Accept a code",
+      message: "Paste a friend’s 6-letter CoPet code (or the whole invite text).",
+      placeholder: "")
     guard let code, !code.isEmpty else { return }
     let token = Online.extractCode(code)
     onlineNote = "joining \(token)…"
@@ -1261,11 +1263,16 @@ import AppKit
     friendsItem.submenu = sub
     menu.addItem(friendsItem)
 
-    menu.addItem(item("Invite friend…", #selector(onlineInvite), symbol: "envelope.fill"))
-    menu.addItem(item("Claim invite…", #selector(onlineClaim), symbol: "key.fill"))
+    let bondsItem = item("Bonds…", nil, symbol: "link")
+    let bondsMenu = NSMenu()
+    bondsMenu.addItem(item("Share my code…", #selector(onlineShareCode), symbol: "square.and.arrow.up"))
+    bondsMenu.addItem(item("Accept a code…", #selector(onlineClaim), symbol: "person.badge.plus"))
     if !friends.isEmpty {
-      menu.addItem(item("Leave all bonds", #selector(onlineLeave), symbol: "rectangle.portrait.and.arrow.right"))
+      bondsMenu.addItem(.separator())
+      bondsMenu.addItem(item("Leave all bonds", #selector(onlineLeave), symbol: "rectangle.portrait.and.arrow.right"))
     }
+    bondsItem.submenu = bondsMenu
+    menu.addItem(bondsItem)
     menu.addItem(item("My name…", #selector(onlineSetName), symbol: "pencil"))
     menu.addItem(item("Check for updates…", #selector(checkForUpdates), symbol: "arrow.triangle.2.circlepath"))
     menu.addItem(.separator())

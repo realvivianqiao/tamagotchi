@@ -10,6 +10,7 @@ import {
   renameDeviceOnBonds,
   upsertPlayer,
   getPlayer,
+  appendFriendToPlayer,
 } from "./db.js";
 
 const PORT = Number(process.env.PORT || 3847);
@@ -62,6 +63,10 @@ function uniqueCode() {
 
 function inviteAlive(inv, now = Date.now()) {
   if (!inv) return false;
+  // Standing personal share-code — stays open so a group chat can all join it.
+  if (inv.personalHub) {
+    return now - (inv.createdAt || 0) < BOND_TTL_MS;
+  }
   // Bonded once a guest name or guest device is locked in.
   if (inv.guestName || inv.guestDeviceId) {
     const t = inv.bondedAt || inv.createdAt || 0;
@@ -71,7 +76,27 @@ function inviteAlive(inv, now = Date.now()) {
 }
 
 function isBonded(inv) {
+  if (inv?.personalHub) return false;
   return Boolean(inv && (inv.guestDeviceId || inv.guestName));
+}
+
+function findPersonalHub(deviceId) {
+  if (!deviceId) return null;
+  for (const [c, inv] of invites) {
+    if (inv.personalHub && inv.hostDeviceId === deviceId) return { code: c, inv };
+  }
+  return null;
+}
+
+function findPairBond(hostDeviceId, guestDeviceId) {
+  if (!hostDeviceId || !guestDeviceId) return null;
+  for (const [c, inv] of invites) {
+    if (inv.personalHub) continue;
+    if (inv.hostDeviceId === hostDeviceId && inv.guestDeviceId === guestDeviceId) {
+      return { code: c, inv };
+    }
+  }
+  return null;
 }
 
 async function loadInvites() {
@@ -123,6 +148,7 @@ function upsertInvite(
     guestDeviceId,
     fullness,
     happiness,
+    personalHub,
     preserveGuest = true,
   },
 ) {
@@ -136,12 +162,17 @@ function upsertInvite(
     guestDeviceId: preserveGuest
       ? guestDeviceId || prev?.guestDeviceId || null
       : guestDeviceId ?? null,
+    personalHub: personalHub ?? prev?.personalHub ?? false,
     fullness: Number.isFinite(fullness) ? fullness : prev?.fullness ?? 80,
     happiness: Number.isFinite(happiness) ? happiness : prev?.happiness ?? 80,
     createdAt: prev?.createdAt || Date.now(),
     bondedAt: prev?.bondedAt || null,
   };
-  if ((inv.hostName && inv.guestName) || inv.guestDeviceId) {
+  if (inv.personalHub) {
+    inv.guestName = null;
+    inv.guestDeviceId = null;
+    inv.bondedAt = null;
+  } else if ((inv.hostName && inv.guestName) || inv.guestDeviceId) {
     if (!inv.bondedAt) inv.bondedAt = Date.now();
   }
   invites.set(c, inv);
@@ -192,6 +223,13 @@ function roomPayload(room, self) {
     online,
     members: online,
   }; // `code` lets multi-friend clients update the right person
+}
+
+function notifyDevice(deviceId, msg) {
+  if (!deviceId || !wss) return;
+  for (const client of wss.clients) {
+    if (client.readyState === 1 && client.deviceId === deviceId) send(client, msg);
+  }
 }
 
 function send(ws, msg) {
@@ -347,8 +385,7 @@ const httpServer = createServer(async (req, res) => {
     return res.end();
   }
 
-  // Create / restore a waiting invite. Body.code reuses a known code (client heal).
-  // One device = one host pad; deviceId is stored so the bond survives app updates.
+  // Create / restore invite. personal:true → standing share-code (same forever, many can claim).
   if (req.method === "POST" && url === "/api/invite") {
     const body = await readJson(req);
     const name = String(body.name || "friend").slice(0, 24);
@@ -358,6 +395,46 @@ const httpServer = createServer(async (req, res) => {
       .replace(/[^A-Z0-9]/g, "")
       .slice(0, 6);
     const usable = isValidCode(wanted);
+    const personal = Boolean(body.personal);
+
+    // One device = one permanent share code for group chats.
+    if (personal) {
+      const existing = findPersonalHub(deviceId);
+      if (existing) {
+        existing.inv.hostName = name;
+        if (deviceId) existing.inv.hostDeviceId = deviceId;
+        existing.inv.personalHub = true;
+        existing.inv.guestName = null;
+        existing.inv.guestDeviceId = null;
+        existing.inv.bondedAt = null;
+        ensureRoom(existing.code, { createIfMissing: true });
+        await saveInvites();
+        return json(res, 200, {
+          code: existing.code,
+          personal: true,
+          hostName: name,
+        });
+      }
+      const c = usable ? wanted : uniqueCode();
+      const prev = invites.get(c);
+      if (prev && !prev.personalHub && isBonded(prev) && prev.hostDeviceId !== deviceId) {
+        return json(res, 409, { error: "code taken", code: c });
+      }
+      const inv = upsertInvite(c, {
+        hostName: name,
+        hostDeviceId: deviceId,
+        guestName: null,
+        guestDeviceId: null,
+        fullness: body.fullness,
+        happiness: body.happiness,
+        personalHub: true,
+        preserveGuest: false,
+      });
+      ensureRoom(c, { createIfMissing: true });
+      await saveInvites();
+      return json(res, 200, { code: c, personal: true, hostName: inv.hostName });
+    }
+
     const c = usable ? wanted : uniqueCode();
     const prev = invites.get(c);
     // If this code is already bonded to someone else, don't let a new invite wipe it.
@@ -461,7 +538,7 @@ const httpServer = createServer(async (req, res) => {
     });
   }
 
-  // Claim once per invite. Same guest device may re-claim (idempotent); other devices get 409.
+  // Claim a code. Personal hubs stay open — each new friend gets a private pair room.
   if (req.method === "POST" && url === "/api/claim") {
     const body = await readJson(req);
     const c = String(body.code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -472,6 +549,68 @@ const httpServer = createServer(async (req, res) => {
     if (deviceId && inv.hostDeviceId && inv.hostDeviceId === deviceId) {
       return json(res, 400, { error: "that's your own invite", code: c });
     }
+
+    // Standing share-code: many people can claim the same code to find this host.
+    if (inv.personalHub) {
+      const species = String(body.species || "dog").slice(0, 12);
+      const existing = findPairBond(inv.hostDeviceId, deviceId);
+      if (existing) {
+        existing.inv.guestName = name;
+        await saveInvites();
+        ensureRoom(existing.code, { createIfMissing: true });
+        return json(res, 200, {
+          code: existing.code,
+          hostName: inv.hostName,
+          guestName: name,
+          fullness: existing.inv.fullness,
+          happiness: existing.inv.happiness,
+          alreadyBonded: true,
+          shareCode: c,
+        });
+      }
+      const pair = uniqueCode();
+      const pairInv = upsertInvite(pair, {
+        hostName: inv.hostName,
+        guestName: name,
+        hostDeviceId: inv.hostDeviceId,
+        guestDeviceId: deviceId,
+        fullness: Number.isFinite(body.fullness) ? body.fullness : inv.fullness,
+        happiness: Number.isFinite(body.happiness) ? body.happiness : inv.happiness,
+        personalHub: false,
+        preserveGuest: false,
+      });
+      pairInv.bondedAt = Date.now();
+      ensureRoom(pair, { createIfMissing: true });
+      await saveInvites();
+      // Host learns about the new friend (cloud + live socket).
+      const hostFriend = {
+        code: pair,
+        partnerName: name,
+        fullness: pairInv.fullness,
+        happiness: pairInv.happiness,
+        lastActivity: "just bonded",
+        species,
+      };
+      await appendFriendToPlayer(inv.hostDeviceId, hostFriend);
+      notifyDevice(inv.hostDeviceId, {
+        type: "bond",
+        code: pair,
+        partnerName: name,
+        species,
+        fullness: pairInv.fullness,
+        happiness: pairInv.happiness,
+        shareCode: c,
+      });
+      return json(res, 200, {
+        code: pair,
+        hostName: inv.hostName,
+        guestName: name,
+        fullness: pairInv.fullness,
+        happiness: pairInv.happiness,
+        shareCode: c,
+      });
+    }
+
     if (inv.guestDeviceId) {
       if (deviceId && inv.guestDeviceId === deviceId) {
         inv.guestName = name;
@@ -647,6 +786,12 @@ wss.on("connection", (ws) => {
       msg = JSON.parse(String(raw));
     } catch {
       return send(ws, { type: "error", text: "bad json" });
+    }
+
+    // Identify this socket's device (so we can push "someone claimed your code").
+    if (msg.type === "hello") {
+      ws.deviceId = String(msg.deviceId || "").slice(0, 64) || null;
+      return send(ws, { type: "hello_ok", deviceId: ws.deviceId });
     }
 
     // Attach to a friend room (one socket can be in many rooms).

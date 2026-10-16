@@ -16,19 +16,23 @@ create table if not exists public.mochi_players (
   updated_at timestamptz not null default now()
 );
 
--- Invite / bond directory (one code = one pair; host/guest device ids lock the bond)
+-- Invite / bond directory.
+-- personal_hub=true → standing share-code (many can claim; each claim creates a pair row).
 create table if not exists public.mochi_bonds (
   code text primary key,
   host_name text,
   guest_name text,
   host_device_id text,
   guest_device_id text,
+  personal_hub boolean not null default false,
   fullness double precision not null default 80,
   happiness double precision not null default 80,
   created_at timestamptz not null default now(),
   bonded_at timestamptz,
   updated_at timestamptz not null default now()
 );
+
+alter table public.mochi_bonds add column if not exists personal_hub boolean not null default false;
 
 create index if not exists mochi_bonds_host_device_idx on public.mochi_bonds (host_device_id);
 create index if not exists mochi_bonds_guest_device_idx on public.mochi_bonds (guest_device_id);

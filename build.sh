@@ -22,6 +22,10 @@ cp Info.plist "$APP/Contents/Info.plist"
 # Embed Sparkle
 rm -rf "$APP/Contents/Frameworks/Sparkle.framework"
 cp -R vendor/Sparkle.framework "$APP/Contents/Frameworks/"
+# Non-sandboxed: drop XPC services. Leaving them makes Sparkle try Installer.xpc,
+# which launchd rejects for ad-hoc apps → "error occurred while launching the installer".
+rm -rf "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices"
+rm -f "$APP/Contents/Frameworks/Sparkle.framework/XPCServices"
 
 # App icon = in-app dog sprite → .icns (pixel-perfect at every size)
 swiftc -O -swift-version 5 -target "arm64-apple-macosx${MIN}" \
@@ -61,7 +65,12 @@ fi
 /tmp/CoPetMakeIcon public/favicon.png 256
 /tmp/CoPetMakeIcon public/app-icon.png 1024
 
-codesign --force --deep --sign - "$APP"
+# Sign inside-out. Never --deep: it strips Autoupdate's hardened runtime and breaks updates.
+SPARKLE_FW="$APP/Contents/Frameworks/Sparkle.framework"
+codesign --force --sign - --options runtime "$SPARKLE_FW/Versions/B/Autoupdate"
+codesign --force --sign - --options runtime "$SPARKLE_FW/Versions/B/Updater.app"
+codesign --force --sign - --options runtime "$SPARKLE_FW"
+codesign --force --sign - "$APP"
 
 VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist 2>/dev/null || echo "0.0")
 BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' Info.plist 2>/dev/null || echo "0")

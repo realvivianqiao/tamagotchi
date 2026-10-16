@@ -6,16 +6,16 @@
     <description>CoPet updates</description>
     <language>en</language>
     <item>
-      <title>CoPet 0.5.33</title>
-      <pubDate>2026-10-16T04:18:04Z</pubDate>
-      <sparkle:version>44</sparkle:version>
-      <sparkle:shortVersionString>0.5.33</sparkle:shortVersionString>
+      <title>CoPet 0.5.34</title>
+      <pubDate>2026-10-16T04:22:03Z</pubDate>
+      <sparkle:version>45</sparkle:version>
+      <sparkle:shortVersionString>0.5.34</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-      <description><![CDATA[Clean up the top of the menu — no checkmark clutter or greyed-out stats.]]></description>
+      <description><![CDATA[Fix Check for updates — installer can launch again (no more Update Error).]]></description>
       <enclosure
         url="https://tamagotchi-udtz.onrender.com/CoPet.zip"
-        sparkle:edSignature="IlHM45FPiYeua3FTCLs9TjYAN3YkIBBRm1qvoM5Qtp+mUI+O7m2yEuDFLnl+SQSkdtyP75BA1y4qfHwKAGIRDg=="
-        length="1786301"
+        sparkle:edSignature="ZD15P/RhRCcoP7eY7vOE12uL0rOG9Sky6OuFXWr/fk0U/++ZShv04GVzDXTKasVnaHIBELeIIEeh8fM1vbqDCw=="
+        length="1689373"
         type="application/octet-stream" />
     </item>
   </channel>

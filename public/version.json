@@ -1,6 +1,6 @@
 {
-  "version": "0.5.33",
+  "version": "0.5.34",
   "url": "/CoPet.zip",
-  "notes": "Clean up the top of the menu \u2014 no checkmark clutter or greyed-out stats.",
-  "publishedAt": "2026-10-16T04:18:04Z"
+  "notes": "Fix Check for updates \u2014 installer can launch again (no more Update Error).",
+  "publishedAt": "2026-10-16T04:22:03Z"
 }

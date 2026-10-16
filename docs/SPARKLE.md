@@ -32,6 +32,7 @@ mkdir -p secrets
 - **Keep the server backward-compatible** for a version or two; old clients should get a clear update prompt, not a silent break.
 - **Dev vs shipping** (later): a `com.vivianqiao.copet.dev` build pointed at a test server keeps experiments off friends’ bonds.
 - **Developer ID ($99)** becomes worth it when you need stable macOS permissions across updates; ad-hoc + Sparkle EdDSA is fine until then.
+- **Signing**: never `codesign --deep` — it breaks Sparkle’s Autoupdate helper. `build.sh` signs Autoupdate → Updater.app → framework → app, and strips unused XPC services (we’re not sandboxed).
 
 ## Feed
 

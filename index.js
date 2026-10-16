@@ -321,8 +321,10 @@ async function serveStatic(req, res) {
       const type = mime[extname(safe)] || "application/octet-stream";
       const headers = { "content-type": type };
       if (extname(safe) === ".zip") headers["content-disposition"] = 'attachment; filename="CoPet.zip"';
-      // Clients poll this to auto-update — never serve a stale copy.
-      if (rel === "version.json") headers["cache-control"] = "no-store";
+      // Clients poll these to auto-update — never serve a stale copy.
+      if (rel === "version.json" || rel === "appcast.xml") {
+        headers["cache-control"] = "no-store";
+      }
       res.writeHead(200, headers);
       return res.end(data);
     } catch {

@@ -6,3 +6,13 @@ build/
 .env
 .env.*
 tamagotchi/
+# Sparkle private key — NEVER commit. Back up secrets/sparkle_eddsa_private.key safely.
+secrets/
+vendor/Sparkle-*.tar.xz
+vendor/Sparkle Test App.app/
+vendor/Symbols/
+vendor/CHANGELOG
+vendor/INSTALL
+vendor/LICENSE
+vendor/SampleAppcast.xml
+CoPet.zip

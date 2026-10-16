@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>CoPet</title>
+    <link>https://tamagotchi-udtz.onrender.com/</link>
+    <description>CoPet updates</description>
+    <language>en</language>
+    <item>
+      <title>CoPet 0.4</title>
+      <pubDate>2026-10-16T01:44:56Z</pubDate>
+      <sparkle:version>5</sparkle:version>
+      <sparkle:shortVersionString>0.4</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[Sparkle auto-updates. Download once more — after this, Check for updates… handles the rest.]]></description>
+      <enclosure
+        url="https://tamagotchi-udtz.onrender.com/CoPet.zip"
+        sparkle:edSignature="LbBCVB4kpQbrKBzm3v4pg9npZ7fzogiVAQjIzcoA/Mwr3YQjPjbZX88ngSr5z6MiLn/eT3oYfCpadMAak9eDCg=="
+        length="1605000"
+        type="application/octet-stream" />
+    </item>
+  </channel>
+</rss>

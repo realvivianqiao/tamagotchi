@@ -143,7 +143,7 @@ import AppKit
       self.pushOnline()
     }
     Online.shared.restoreBondIfAny()
-    Updater.checkOnLaunch()
+    Updater.shared.start()
   }
 
   private func refreshStatusItem() {
@@ -1235,7 +1235,7 @@ import AppKit
   }
 
   @objc private func checkForUpdates() {
-    Updater.checkNow()
+    Updater.shared.checkNow()
   }
 
   private func item(_ title: String, _ action: Selector) -> NSMenuItem {

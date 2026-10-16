@@ -14,6 +14,9 @@ A tiny Mac desktop pet. Download, invite someone, feed/pet/play — they see it 
 ## Gatekeeper
 The zip is **ad-hoc signed** (not Apple Developer ID). Friends may see “Apple could not verify CoPet” — **System Settings → Privacy & Security → Open Anyway**, or right-click → Open. Work laptops may still need IT. Wider sharing needs a paid Apple developer account + notarization.
 
+## Auto-updates (Sparkle)
+v0.4+ uses [Sparkle](https://sparkle-project.org) with EdDSA-signed `appcast.xml`. Friends download once; then updates install in-app. See [docs/SPARKLE.md](docs/SPARKLE.md). **Back up `secrets/sparkle_eddsa_private.key` — never commit it.**
+
 ## Where data lives
 - **Supabase** (source of truth across Render sleeps/redeploys): `mochi_players` + `mochi_bonds`. See `supabase/schema.sql`.
 - **On each Mac**: UserDefaults cache + stable `deviceId` (one device = one pad).

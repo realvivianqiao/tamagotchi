@@ -1,6 +1,6 @@
 {
-  "version": "0.5.9",
+  "version": "0.5.10",
   "url": "/CoPet.zip",
-  "notes": "Names are Username + pad (e.g. Viv Test\u2019s Zuzu).",
-  "publishedAt": "2026-10-16T03:03:18Z"
+  "notes": "Friend pads only appear during interactions, then always leave.",
+  "publishedAt": "2026-10-16T03:05:08Z"
 }

@@ -1013,7 +1013,6 @@ import AppKit
       action: action,
       label: label,
       role: .outgoingTarget,
-      ephemeral: visitor?.code != code,
       deferHostReaction: true)
   }
 
@@ -1040,10 +1039,10 @@ import AppKit
       action: action,
       label: label,
       role: .incomingActor,
-      ephemeral: true,
       deferHostReaction: true)
   }
 
+  /// Friend pads only appear for a brief interaction, then always leave.
   private func presentVisit(
     code: String,
     name: String,
@@ -1051,30 +1050,22 @@ import AppKit
     action: String,
     label: String,
     role: FriendVisitor.VisitRole,
-    ephemeral: Bool,
     deferHostReaction: Bool = false
   ) {
-    let reuse = visitor?.code == code ? visitor : nil
-    if reuse == nil {
-      visitor?.dismiss()
-      let v = FriendVisitor(
-        code: code, name: name, species: species, near: x,
-        ephemeral: ephemeral, quiet: true)
-      v.hostX = { [weak self] in self?.x ?? 0 }
-      v.hostY = { [weak self] in self?.y ?? 0 }
-      visitor = v
-    } else {
-      reuse?.update(name: name, species: species)
-    }
-    guard let v = visitor else { return }
+    // Never keep a lingering visitor — rebuild for each interaction.
+    visitor?.dismiss()
+    visitor = nil
+    let v = FriendVisitor(
+      code: code, name: name, species: species, near: x,
+      ephemeral: true, quiet: true)
     v.hostX = { [weak self] in self?.x ?? 0 }
     v.hostY = { [weak self] in self?.y ?? 0 }
+    visitor = v
     v.onPlayWithHost = { [weak self] in
       self?.startSignatureMove(seconds: 2.8)
     }
     v.onGestureStart = { [weak self] in
       guard let self else { return }
-      // Clear the brief label so it doesn’t stick through the whole visit.
       self.bubble = nil
       self.bubbleTicks = 0
       if role == .incomingActor, deferHostReaction {
@@ -1087,17 +1078,16 @@ import AppKit
         self.performHostSideVisit(action: action)
       }
     }
-    let wasEphemeral = ephemeral && reuse == nil
     v.beginVisit(action: action, label: label, role: role) { [weak self] in
       guard let self else { return }
       self.bubble = nil
       self.bubbleTicks = 0
-      if wasEphemeral, self.visitor?.code == code {
+      // Always clear the guest pad after the visit — only your pet stays.
+      if self.visitor?.code == code {
         self.visitor?.dismiss()
         self.visitor = nil
       }
     }
-    // Flash the label once — short — then gesture takes over.
     say(label, seconds: 1.1)
   }
 
@@ -1176,34 +1166,6 @@ import AppKit
     render()
   }
 
-  @objc private func showFriendOnScreen(_ sender: NSMenuItem) {
-    guard let code = sender.representedObject as? String,
-          let f = Online.shared.friends.first(where: { $0.code == code }), !f.waiting
-    else { return }
-    logApp("show_friend", code: code, targetName: f.partnerName,
-           extra: ["species": f.petSpecies.rawValue])
-    visitor?.dismiss()
-    let v = FriendVisitor(code: code, name: f.partnerName, species: f.petSpecies, near: x)
-    v.hostX = { [weak self] in self?.x ?? 0 }
-    visitor = v
-    Online.shared.setActive(code: code)
-    say("brought \(f.partnerName) over \(f.petSpecies.emoji)", seconds: 2)
-  }
-
-  @objc private func hideFriendOnScreen(_ sender: NSMenuItem) {
-    // Menu may pass a code, or the top-level “Hide …” item with none.
-    if let code = sender.representedObject as? String, visitor?.code != code { return }
-    hideVisitor()
-  }
-
-  @objc private func hideVisitor() {
-    guard visitor != nil else { return }
-    logApp("hide_friend", code: visitor?.code, targetName: visitor?.name)
-    visitor?.dismiss()
-    visitor = nil
-    say("visitor left", seconds: 1.5)
-  }
-
   @objc private func friendFeed(_ sender: NSMenuItem) {
     guard let code = sender.representedObject as? String,
           let name = Online.shared.friends.first(where: { $0.code == code })?.partnerName
@@ -1232,12 +1194,8 @@ import AppKit
     sendToFriend(action: "poke", code: code, name: name)
   }
 
-  /// Top-level poke — targets visitor on screen, else the selected friend.
+  /// Top-level poke — aims at the selected friend.
   @objc private func pokeActiveFriend() {
-    if let v = visitor {
-      sendToFriend(action: "poke", code: v.code, name: v.name)
-      return
-    }
     guard let f = Online.shared.activeFriend, !f.waiting else {
       say("pick a friend first", seconds: 2)
       return
@@ -1469,15 +1427,6 @@ import AppKit
           focus.representedObject = f.code
           if f.code == Online.shared.activeCode { focus.state = .on }
           person.addItem(focus)
-
-          let onScreen = visitor?.code == f.code
-          let bring = NSMenuItem(
-            title: onScreen ? "👁  Hide from screen" : "👁  Show on screen",
-            action: onScreen ? #selector(hideFriendOnScreen(_:)) : #selector(showFriendOnScreen(_:)),
-            keyEquivalent: "")
-          bring.target = self
-          bring.representedObject = f.code
-          person.addItem(bring)
 
           for (title, sel) in [
             ("🍖  Feed", #selector(friendFeed(_:))),

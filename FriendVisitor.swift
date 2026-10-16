@@ -461,14 +461,12 @@ import AppKit
 
   private func finishVisit() {
     visiting = false
+    bubble = nil
+    bubbleTicks = 0
     let done = onVisitDone
     onVisitDone = nil
-    if ephemeral {
-      done?()
-    } else {
-      set(.sit, seconds: 2)
-      done?()
-    }
+    // Interaction visits always tear down via onDone (Pet clears the visitor).
+    done?()
   }
 
   private func stepIdle() {

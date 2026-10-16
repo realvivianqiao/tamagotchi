@@ -1124,7 +1124,7 @@ import AppKit
     Online.shared.setActive(code: code)
     logApp("menu_friend_\(action)", code: code, targetName: name)
     if !Online.shared.appearOnline {
-      say("you're offline — go online to reach friends", seconds: 2.5)
+      say("turn on “Friends can visit” first", seconds: 2.5)
       // Still play the local visit preview on your screen.
     } else {
       // Sync reaches them only if both are in the bond room (🟢).
@@ -1517,10 +1517,15 @@ import AppKit
   }
 
   @objc private func toggleAppearOnline() {
-    let next = !Online.shared.appearOnline
-    Online.shared.setAppearOnline(next)
-    logApp(next ? "appear_online" : "appear_offline")
-    say(next ? "online 🟢" : "offline ⚪️", seconds: 2)
+    applyVisitPresence(!Online.shared.appearOnline)
+  }
+
+  /// Pad presence — game language, not “online/offline.”
+  private func applyVisitPresence(_ friendsCanVisit: Bool) {
+    guard friendsCanVisit != Online.shared.appearOnline else { return }
+    Online.shared.setAppearOnline(friendsCanVisit)
+    logApp(friendsCanVisit ? "appear_online" : "appear_offline")
+    say(friendsCanVisit ? "back on the pad ✨" : "hiding for a bit 🌙", seconds: 2)
     refreshStatusItem()
   }
 
@@ -1596,12 +1601,20 @@ import AppKit
       speciesItem.submenu = speciesMenu
       menu.addItem(speciesItem)
     }
-    menu.addItem(item(
-      Online.shared.appearOnline ? "Status: Online 🟢" : "Status: Offline ⚪️",
-      #selector(toggleAppearOnline)))
-    menu.addItem(headerLine("\(species.emoji)  \(petName)"))
-    menu.addItem(headerLine("Fullness   \(bar(fullness))"))
-    menu.addItem(headerLine("Happiness  \(bar(happiness))"))
+    // Pad card: name + meters + “Friends can visit” — companion HUD, not Status: Offline.
+    let card = PadMenuCard(frame: NSRect(x: 0, y: 0, width: 248, height: 108))
+    card.configure(
+      emoji: species.emoji,
+      name: petName,
+      fullness: fullness,
+      happiness: happiness,
+      friendsCanVisit: Online.shared.appearOnline)
+    card.onVisitChanged = { [weak self] on in
+      self?.applyVisitPresence(on)
+    }
+    let cardItem = NSMenuItem()
+    cardItem.view = card
+    menu.addItem(cardItem)
 
     if !hidden {
       menu.addItem(.separator())

@@ -513,7 +513,7 @@ struct FriendBond: Codable, Equatable {
     // Actions need a room attach — only while appearing online.
     if action != nil {
       guard appearOnline else {
-        onStatus?("you're offline — go online to reach friends")
+        onStatus?("flip on “Friends can visit” to reach them")
         return
       }
       Task { @MainActor in
@@ -554,14 +554,14 @@ struct FriendBond: Codable, Equatable {
       for f in friends where !f.waiting {
         attachNow(code: f.code)
       }
-      onStatus?("you're online 🟢")
+      onStatus?("on the pad — friends can visit")
     } else {
       for f in friends {
         send(["type": "detach", "code": f.code])
       }
       // Local view of partners goes quiet until we re-attach and hear presence again.
       for i in friends.indices { friends[i].online = false }
-      onStatus?("you're offline ⚪️")
+      onStatus?("hidden from friends")
     }
     onPresence?()
     onFriendsChanged?()

@@ -1,6 +1,6 @@
 {
-  "version": "0.5.34",
+  "version": "0.5.35",
   "url": "/CoPet.zip",
-  "notes": "Fix Check for updates \u2014 installer can launch again (no more Update Error).",
-  "publishedAt": "2026-10-16T04:22:03Z"
+  "notes": "Pad card in the menu \u2014 meters + Friends can visit switch instead of Status: Offline.",
+  "publishedAt": "2026-10-16T04:28:26Z"
 }

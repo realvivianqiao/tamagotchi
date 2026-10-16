@@ -1,5 +1,5 @@
 /**
- * Supabase persistence for Mochi players + bonds.
+ * Supabase persistence for CoPet players + bonds (survives Render sleep).
  * Requires SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY).
  * Falls back to in-memory / local file when unset.
  */

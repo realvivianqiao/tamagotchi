@@ -1,6 +1,6 @@
 {
-  "version": "0.2",
+  "version": "0.3",
   "url": "/CoPet.zip",
-  "notes": "Auto-updates, bonding locked to your Mac pad, and name sync.",
-  "publishedAt": "2026-10-16T01:35:41Z"
+  "notes": "Gatekeeper help, HTTPS-only ATS, quieter reconnect when Render wakes.",
+  "publishedAt": "2026-10-16T01:37:14Z"
 }

@@ -7,14 +7,17 @@ A tiny Mac desktop pet. Download, invite someone, feed/pet/play — they see it 
 ## How it works
 1. Download CoPet from the site
 2. Open the app — you have a pet
-3. 🐶 → **Invite partner…** (copies a message with a code)
+3. Menu → **Invite friend…** (copies a code)
 4. They download → **Claim invite…** → paste code
 5. Bonded. Actions sync both ways.
 
+## Gatekeeper
+The zip is **ad-hoc signed** (not Apple Developer ID). Friends may see “Apple could not verify CoPet” — **System Settings → Privacy & Security → Open Anyway**, or right-click → Open. Work laptops may still need IT. Wider sharing needs a paid Apple developer account + notarization.
+
 ## Where data lives
-- **Supabase** (cloud source of truth): name, species, friend list, and bond codes are stored in `mochi_players` + `mochi_bonds`. See `supabase/schema.sql`.
-- **On each Mac**: a local cache (UserDefaults) + a stable `deviceId`, so the app still works offline and then syncs.
-- **Render**: realtime WebSocket relay. Set `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` on the web service.
+- **Supabase** (source of truth across Render sleeps/redeploys): `mochi_players` + `mochi_bonds`. See `supabase/schema.sql`.
+- **On each Mac**: UserDefaults cache + stable `deviceId` (one device = one pad).
+- **Render**: realtime WebSocket only — set `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` so bonds survive idle sleep.
 
 ## Dev
 ```bash

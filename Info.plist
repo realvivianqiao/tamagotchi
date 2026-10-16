@@ -6,15 +6,15 @@
   <key>CFBundleName</key><string>CoPet</string>
   <key>CFBundleExecutable</key><string>CoPet</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.2</string>
-  <key>CFBundleVersion</key><string>2</string>
+  <key>CFBundleShortVersionString</key><string>0.3</string>
+  <key>CFBundleVersion</key><string>3</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
+  <!-- HTTPS only to the live site; local networking kept for optional localhost WS. -->
   <key>NSAppTransportSecurity</key>
   <dict>
     <key>NSAllowsLocalNetworking</key><true/>
-    <key>NSAllowsArbitraryLoads</key><true/>
   </dict>
 </dict>
 </plist>

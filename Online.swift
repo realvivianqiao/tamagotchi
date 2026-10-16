@@ -663,7 +663,7 @@ struct FriendBond: Codable, Equatable {
   private func healMissingRoom(code: String) async {
     guard let i = friends.firstIndex(where: { $0.code == code }) else { return }
     if friends[i].waiting {
-      onStatus?("invite expired — restoring \(code)…")
+      onStatus?("reconnecting…")
       do {
         let res = try await postJSON(path: "/api/invite", body: [
           "name": displayName,
@@ -676,27 +676,24 @@ struct FriendBond: Codable, Equatable {
         if let guest = res["guestName"] as? String, !guest.isEmpty {
           friends[i].partnerName = guest
           friends[i].waiting = false
-          friends[i].lastActivity = "bond restored"
+          friends[i].lastActivity = nil
           saveFriends()
           onFriendsChanged?()
           attach(code: restored)
           onStatus?("bonded with \(guest)")
           return
         }
-        friends[i].lastActivity = "invite restored — send \(restored) again"
+        friends[i].lastActivity = nil
         saveFriends()
         onFriendsChanged?()
         attach(code: restored)
-        onStatus?("waiting · code \(restored) (send it again)")
+        onStatus?("waiting · code \(restored)")
       } catch {
-        friends[i].lastActivity = "invite dead — make a new one"
-        saveFriends()
-        onFriendsChanged?()
-        onStatus?("couldn’t restore invite — Invite friend again")
+        onStatus?("couldn’t restore invite — try Invite friend again")
       }
       return
     }
-    onStatus?("reconnecting bond \(code)…")
+    onStatus?("reconnecting…")
     do {
       _ = try await postJSON(path: "/api/restore", body: [
         "name": displayName,
@@ -706,17 +703,14 @@ struct FriendBond: Codable, Equatable {
         "fullness": friends[i].fullness,
         "happiness": friends[i].happiness,
       ])
-      friends[i].lastActivity = "bond restored"
+      friends[i].lastActivity = nil
       saveFriends()
       onFriendsChanged?()
       attach(code: code)
-      onStatus?("reconnected · \(friends[i].partnerName)")
+      onStatus?(friends[i].online ? "🟢 \(friends[i].partnerName) online" : "⚪️ \(friends[i].partnerName)")
     } catch {
-      // Attach alone can still recreate the live room from the code.
+      // Attach alone can still recreate the live room from the code + Supabase.
       attach(code: code)
-      friends[i].lastActivity = "retrying attach…"
-      saveFriends()
-      onFriendsChanged?()
     }
   }
 

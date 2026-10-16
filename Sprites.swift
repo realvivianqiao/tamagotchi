@@ -259,54 +259,71 @@ enum Dog {
     return (0, Int(bodyY) - 8)
   }
 
-  // MARK: Bird — tiny chick, same crisp silhouette language
+  // MARK: Bird — front-facing yellow chick (plump, cream belly, tiny tuft)
 
   private static func drawBird(_ c: inout Canvas, _ look: Look) -> (Int, Int) {
     let hop: Int = {
       if case .walk(1) = look.pose { return 1 }
       return 0
     }()
-    let bodyY = 16.0 - Double(hop)
+    let (bodyY, footY): (Double, Int) = {
+      switch look.pose {
+      case .lie: return (18.5, 24)
+      case .hang: return (12.0, 23)
+      default: return (13.5 - Double(hop), 24)
+      }
+    }()
+
     if look.pose == .lie {
-      c.ellipse(18, 21, 5.5, 2.8, .yellow)
-      c.ellipse(24, 20, 3.5, 2.8, .yellow)
-      c.ellipse(24, 20.5, 2, 1.2, .cream)
-    } else if look.pose == .hang {
-      c.ellipse(18, 13, 5, 4.5, .yellow)
-      c.rect(16, 18, 16, 23, .orange)
-      c.rect(20, 18, 20, 23, .orange)
+      // loafed chick
+      c.ellipse(17.5, bodyY, 9.0, 4.2, .yellow)
+      c.ellipse(17.5, bodyY + 0.8, 5.0, 2.2, .cream)
+      c.rect(13, footY, 15, footY, .orange)
+      c.rect(20, footY, 22, footY, .orange)
     } else {
-      c.rect(16, Int(bodyY) + 4, 16, 23, .orange)
-      c.rect(20, Int(bodyY) + 4, 20, 23, .orange)
-      c.rect(15, 23, 17, 23, .orange)
-      c.rect(19, 23, 21, 23, .orange)
-      c.ellipse(17.5, bodyY, 5, 4.2, .yellow)
-      c.ellipse(17.5, bodyY + 1.2, 2.8, 2.0, .cream)
+      // little orange feet
+      c.rect(14, footY, 16, footY, .orange)
+      c.rect(15, footY - 1, 15, footY - 1, .orange)
+      c.rect(19, footY, 21, footY, .orange)
+      c.rect(20, footY - 1, 20, footY - 1, .orange)
+
+      // plump round body
+      c.ellipse(17.5, bodyY, 8.6, 8.2, .yellow)
+      // cream belly
+      c.ellipse(17.5, bodyY + 2.4, 4.6, 3.4, .cream)
+
+      // stubby yellow side wings
       let wingUp = look.wag > 0 || hop == 1
-      c.ellipse(13, bodyY + (wingUp ? -1.5 : 0.5), 3.0, 2.2, .orange)
+      let wy = bodyY + (wingUp ? -1.2 : 0.8)
+      c.ellipse(9.2, wy, 2.8, 2.6, .yellow)
+      c.ellipse(25.8, wy, 2.8, 2.6, .yellow)
     }
-    let head = (-5, Int(bodyY) - 12)
-    let (dx, dy) = (Double(head.0), Double(head.1))
-    c.ellipse(24 + dx, 7.5 + dy, 5.0, 4.8, .yellow)
-    c.ellipse(24 + dx, 8.5 + dy, 2.8, 2.2, .cream)
-    // stubby beak
-    c.rect(29 + head.0, 8 + head.1, 32 + head.0, 9 + head.1, .orange)
-    if look.tongue { c[30 + head.0, 10 + head.1] = .pink }
-    // little crest
-    c[22 + head.0, 2 + head.1] = .orange
-    c[23 + head.0, 1 + head.1] = .orange
-    c[24 + head.0, 2 + head.1] = .orange
-    c.rect(18 + head.0, 12 + head.1, 20 + head.0, 13 + head.1, .red)
-    c[19 + head.0, 14 + head.1] = .tag
-    return head
+
+    // tiny tuft on top
+    let tuftY = Int(bodyY - 8.6)
+    c[17, tuftY] = .yellow
+    c[17, tuftY - 1] = .yellow
+    c[16, tuftY] = .yellow
+    c[18, tuftY] = .yellow
+
+    // little orange triangle beak between the eyes
+    let by = Int(bodyY) - 1
+    c[17, by] = .orange
+    c[16, by + 1] = .orange
+    c[17, by + 1] = .orange
+    c[18, by + 1] = .orange
+    c[17, by + 2] = .orange
+    if look.tongue { c[17, by + 3] = .pink }
+
+    return (0, Int(bodyY) - 9)
   }
 
-  /// Exact original face for the dog; front-facing blob face for the octopus.
+  /// Dog: side face. Octopus / bird: front-facing kawaii faces.
   private static func drawEyes(_ c: inout Canvas, at o: (x: Int, y: Int), eyes: Eyes, species: Species) {
     let (x, y): (Int, Int) = {
       switch species {
       case .octopus: return (20 + o.x, 8 + o.y) // right eye; left is x-6
-      case .bird: return (23 + o.x, 6 + o.y)
+      case .bird: return (21 + o.x, 7 + o.y) // right eye; left is x-7
       case .dog: return (26 + o.x, 8 + o.y)
       }
     }()
@@ -314,9 +331,12 @@ enum Dog {
     func face(_ ex: Int, _ ey: Int) {
       switch eyes {
       case .open:
-        // octopus: plain square dots (no sparkle) like the reference
         if species == .octopus {
           c.rect(ex, ey, ex, ey, .black)
+        } else if species == .bird {
+          // 2×2 black eyes with white sparkle in the corner
+          c.rect(ex, ey, ex + 1, ey + 1, .black)
+          c[ex, ey] = .white
         } else {
           c.rect(ex, ey, ex + 1, ey + 1, .black)
           c[ex + 1, ey] = .white
@@ -337,22 +357,29 @@ enum Dog {
       }
     }
 
-    if species == .octopus {
+    let blush: Px = eyes == .angry ? .red : .pink
+    switch species {
+    case .octopus:
       face(x, y)
       face(x - 6, y)
-      // tiny v mouth
       if eyes != .angry {
         c[x - 3, y + 3] = .black
         c[x - 4, y + 2] = .black
         c[x - 2, y + 2] = .black
       }
-      // blush freckles under each eye
-      let blush: Px = eyes == .angry ? .red : .pink
       c[x - 7, y + 3] = blush
       c[x + 1, y + 3] = blush
-    } else {
+    case .bird:
       face(x, y)
-      c[x, y + 3] = eyes == .angry ? .red : .pink
+      face(x - 7, y)
+      // pink cheek dashes under each eye
+      c[x - 9, y + 3] = blush
+      c[x - 8, y + 3] = blush
+      c[x + 2, y + 3] = blush
+      c[x + 3, y + 3] = blush
+    case .dog:
+      face(x, y)
+      c[x, y + 3] = blush
     }
   }
 }

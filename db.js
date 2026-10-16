@@ -174,3 +174,27 @@ export async function getPlayer(deviceId) {
   }
   return data;
 }
+
+/**
+ * Append a product-analytics row. Fire-and-forget from request handlers.
+ * Never stores secrets — only CoPet game/UX fields.
+ */
+export async function logEvent(evt) {
+  if (!supabase) return { ok: false, error: "supabase disabled" };
+  const row = {
+    device_id: evt.deviceId ? String(evt.deviceId).slice(0, 64) : null,
+    display_name: evt.displayName ? String(evt.displayName).slice(0, 24) : null,
+    event: String(evt.event || "unknown").slice(0, 64),
+    code: evt.code ? String(evt.code).toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6) : null,
+    target_name: evt.targetName ? String(evt.targetName).slice(0, 24) : null,
+    species: evt.species ? String(evt.species).slice(0, 12) : null,
+    friend_count: Number.isFinite(evt.friendCount) ? Math.max(0, Math.min(500, evt.friendCount)) : null,
+    payload: evt.payload && typeof evt.payload === "object" ? evt.payload : {},
+  };
+  const { error } = await supabase.from("mochi_events").insert(row);
+  if (error) {
+    console.warn("supabase log event:", error.message);
+    return { ok: false, error: error.message };
+  }
+  return { ok: true };
+}

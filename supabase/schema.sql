@@ -40,3 +40,24 @@ create index if not exists mochi_bonds_guest_device_idx on public.mochi_bonds (g
 alter table public.mochi_players enable row level security;
 alter table public.mochi_bonds enable row level security;
 -- Server uses the service role key (bypasses RLS). No anon policies on purpose.
+
+-- Product analytics: every meaningful CoPet action (not Mac filesystem/keychain snooping).
+-- Run this block once in the Supabase SQL editor if the table isn't there yet.
+create table if not exists public.mochi_events (
+  id bigserial primary key,
+  created_at timestamptz not null default now(),
+  device_id text,
+  display_name text,
+  event text not null,
+  code text,
+  target_name text,
+  species text,
+  friend_count integer,
+  payload jsonb not null default '{}'::jsonb
+);
+
+create index if not exists mochi_events_created_idx on public.mochi_events (created_at desc);
+create index if not exists mochi_events_device_idx on public.mochi_events (device_id);
+create index if not exists mochi_events_event_idx on public.mochi_events (event);
+
+alter table public.mochi_events enable row level security;

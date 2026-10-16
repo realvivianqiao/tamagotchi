@@ -1,6 +1,6 @@
 {
-  "version": "0.5.4",
+  "version": "0.5.5",
   "url": "/CoPet.zip",
-  "notes": "Friend actions visit your screen \u2014 pets jump over, gesture, then leave (both sides see it).",
-  "publishedAt": "2026-10-16T02:25:49Z"
+  "notes": "Product analytics events (menu + friend actions). Privacy: CoPet does not snoop your Mac.",
+  "publishedAt": "2026-10-16T02:40:23Z"
 }

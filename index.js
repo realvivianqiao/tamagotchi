@@ -11,7 +11,13 @@ import {
   upsertPlayer,
   getPlayer,
   appendFriendToPlayer,
+  logEvent,
 } from "./db.js";
+
+/** Best-effort analytics — never blocks the main request path. */
+function track(evt) {
+  logEvent(evt).catch(() => {});
+}
 
 const PORT = Number(process.env.PORT || 3847);
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -409,6 +415,10 @@ const httpServer = createServer(async (req, res) => {
         existing.inv.bondedAt = null;
         ensureRoom(existing.code, { createIfMissing: true });
         await saveInvites();
+        track({
+          deviceId, displayName: name, event: "invite_hub_reuse", code: existing.code,
+          friendCount: null, payload: { personal: true },
+        });
         return json(res, 200, {
           code: existing.code,
           personal: true,
@@ -432,6 +442,10 @@ const httpServer = createServer(async (req, res) => {
       });
       ensureRoom(c, { createIfMissing: true });
       await saveInvites();
+      track({
+        deviceId, displayName: name, event: "invite_hub_create", code: c,
+        payload: { personal: true },
+      });
       return json(res, 200, { code: c, personal: true, hostName: inv.hostName });
     }
 
@@ -601,6 +615,11 @@ const httpServer = createServer(async (req, res) => {
         happiness: pairInv.happiness,
         shareCode: c,
       });
+      track({
+        deviceId, displayName: name, event: "claim_bond", code: pair,
+        targetName: inv.hostName, species,
+        payload: { shareCode: c, personalHub: true },
+      });
       return json(res, 200, {
         code: pair,
         hostName: inv.hostName,
@@ -653,6 +672,24 @@ const httpServer = createServer(async (req, res) => {
       store: supabaseEnabled ? "supabase" : STORE,
       supabase: supabaseEnabled,
     });
+  }
+
+  // Client analytics (menu clicks, local gestures). Same fields as server track().
+  if (req.method === "POST" && url === "/api/event") {
+    const body = await readJson(req);
+    const event = String(body.event || "").slice(0, 64);
+    if (!event) return json(res, 400, { error: "event required" });
+    track({
+      deviceId: body.deviceId,
+      displayName: body.displayName || body.name,
+      event,
+      code: body.code,
+      targetName: body.targetName,
+      species: body.species,
+      friendCount: body.friendCount,
+      payload: body.payload && typeof body.payload === "object" ? body.payload : {},
+    });
+    return json(res, 200, { ok: true });
   }
 
   // Pull cloud profile + friends. deviceId is the stable pad key (one Mac = one user).
@@ -986,6 +1023,16 @@ wss.on("connection", (ws) => {
       };
       // Don't echo actions back to the actor — local UI already recorded "you: pet".
       // Stats-only syncs still fan out to peers (and skip the sender).
+      if (action) {
+        track({
+          deviceId: ws.deviceId,
+          displayName: fromName,
+          event: `action_${action}`,
+          code: room.code,
+          species: msg.species || (fromName && room.species.get(fromName)) || null,
+          payload: { fullness: mine?.fullness, happiness: mine?.happiness },
+        });
+      }
       broadcast(room, payload, ws);
       return;
     }

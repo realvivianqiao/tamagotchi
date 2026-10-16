@@ -284,6 +284,28 @@ struct FriendBond: Codable, Equatable {
     onPresence?()
   }
 
+  /// Product analytics → `/api/event` → `mochi_events`. Best-effort; never blocks UX.
+  func track(
+    _ event: String,
+    code: String? = nil,
+    targetName: String? = nil,
+    payload: [String: Any] = [:]
+  ) {
+    var body: [String: Any] = [
+      "deviceId": deviceId,
+      "displayName": displayName,
+      "event": event,
+      "species": mySpecies.rawValue,
+      "friendCount": friends.filter { !$0.waiting }.count,
+      "payload": payload,
+    ]
+    if let code { body["code"] = code }
+    if let targetName { body["targetName"] = targetName }
+    Task {
+      _ = try? await postJSON(path: "/api/event", body: body)
+    }
+  }
+
   /// Broadcast your pet's stats (and optional action aimed at the friend in this room).
   /// Does not overwrite that friend's stored stats — those update only when *they* sync.
   func sync(fullness: Double, happiness: Double, action: String? = nil, toCode: String? = nil) {

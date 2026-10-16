@@ -848,6 +848,7 @@ import AppKit
   // MARK: Actions
 
   private func pet() {
+    Online.shared.track("self_pet", payload: ["fullness": fullness, "happiness": happiness])
     _ = wakeIfNapping()
     happiness = min(100, happiness + 6)
     happyTicks = Int(2.5 * fps)
@@ -870,6 +871,7 @@ import AppKit
   }
 
   @objc private func feed() {
+    Online.shared.track("self_feed", payload: ["fullness": fullness, "happiness": happiness])
     // Always feed *your* pet — never no-op. Full pets still eat (second breakfast).
     _ = wakeIfNapping()
     let wasFull = fullness >= 95
@@ -886,6 +888,7 @@ import AppKit
   }
 
   @objc private func play() {
+    Online.shared.track("self_play", payload: ["fullness": fullness, "happiness": happiness])
     _ = wakeIfNapping()
     happiness = min(100, happiness + 12)
     fullness = max(0, fullness - 3)
@@ -939,6 +942,7 @@ import AppKit
   }
 
   @objc private func toggleNap() {
+    Online.shared.track(untilWoken || activity == .sleep ? "self_wake" : "self_nap")
     if untilWoken || activity == .sleep {
       wakeStickyNap()
       let first = Ambient.shared.wakeLine(species: species)
@@ -958,6 +962,9 @@ import AppKit
   /// Carries *your* stats only so they can refresh your FriendBond row — never renames anyone.
   private func sendToFriend(action: String, code: String, name: String) {
     Online.shared.setActive(code: code)
+    Online.shared.track(
+      "menu_friend_\(action)", code: code, targetName: name,
+      payload: ["friendCount": Online.shared.friends.filter { !$0.waiting }.count])
     Online.shared.sync(fullness: fullness, happiness: happiness, action: action, toCode: code)
     let friendSpecies =
       Online.shared.friends.first(where: { $0.code == code })?.petSpecies ?? .dog
@@ -1114,6 +1121,7 @@ import AppKit
     guard let raw = sender.representedObject as? String,
           let next = Species(rawValue: raw)
     else { return }
+    Online.shared.track("choose_species", payload: ["from": species.rawValue, "to": next.rawValue])
     let oldDefault = species.defaultName
     species = next
     Online.shared.mySpecies = next
@@ -1211,6 +1219,7 @@ import AppKit
   @objc private func petFromMenu() { pet() }
 
   @objc private func pokeSelf() {
+    Online.shared.track("self_poke")
     getAngry(fromPoke: true)
     pushOnline()
   }

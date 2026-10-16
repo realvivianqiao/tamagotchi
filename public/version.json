@@ -1,6 +1,6 @@
 {
-  "version": "0.5",
+  "version": "0.5.1",
   "url": "/CoPet.zip",
-  "notes": "Bonds menu + permanent share code for group chats.",
-  "publishedAt": "2026-10-16T02:12:19Z"
+  "notes": "Gesture menu uses emojis (poke/feed/play/pet/nap).",
+  "publishedAt": "2026-10-16T02:14:15Z"
 }

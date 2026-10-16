@@ -1165,24 +1165,20 @@ import AppKit
 
     if !hidden {
       menu.addItem(info(petName))
-      menu.addItem(item("Poke", #selector(pokeSelf), symbol: "hand.point.left.fill"))
-      menu.addItem(item("Feed", #selector(feed), symbol: "fork.knife"))
-      menu.addItem(item("Play", #selector(play), symbol: "tennisball.fill"))
-      menu.addItem(item("Pet", #selector(petFromMenu), symbol: "heart.fill"))
-      menu.addItem(item(
-        isAsleep ? "Wake up" : "Nap",
-        #selector(toggleNap),
-        symbol: isAsleep ? "sun.max.fill" : "moon.zzz.fill"))
-      let speciesItem = item("Choose pet…", nil, symbol: "pawprint.fill")
+      menu.addItem(item("💢  Poke", #selector(pokeSelf)))
+      menu.addItem(item("🍖  Feed", #selector(feed)))
+      menu.addItem(item("🎾  Play", #selector(play)))
+      menu.addItem(item("❤️  Pet", #selector(petFromMenu)))
+      menu.addItem(item(isAsleep ? "☀️  Wake up" : "💤  Nap", #selector(toggleNap)))
+      let speciesItem = NSMenuItem(title: "🐾  Choose pet…", action: nil, keyEquivalent: "")
       let speciesMenu = NSMenu()
       for sp in Species.allCases {
         let row = NSMenuItem(
-          title: sp.defaultName,
+          title: "\(sp.emoji)  \(sp.defaultName)",
           action: #selector(chooseSpecies(_:)),
           keyEquivalent: "")
         row.target = self
         row.representedObject = sp.rawValue
-        row.image = menuSymbol(sp == .dog ? "dog.fill" : sp == .bird ? "bird.fill" : "drop.fill")
         if sp == species { row.state = .on }
         speciesMenu.addItem(row)
       }
@@ -1234,14 +1230,14 @@ import AppKit
           bring.representedObject = f.code
           person.addItem(bring)
 
-          for (title, sel, sym) in [
-            ("Feed", #selector(friendFeed(_:)), "fork.knife"),
-            ("Play", #selector(friendPlay(_:)), "tennisball.fill"),
-            ("Pet", #selector(friendPet(_:)), "heart.fill"),
-            ("Poke", #selector(friendPoke(_:)), "hand.point.left.fill"),
-            ("Tuck in", #selector(friendNap(_:)), "moon.zzz.fill"),
-          ] as [(String, Selector, String)] {
-            let m = item(title, sel, symbol: sym)
+          for (title, sel) in [
+            ("🍖  Feed", #selector(friendFeed(_:))),
+            ("🎾  Play", #selector(friendPlay(_:))),
+            ("❤️  Pet", #selector(friendPet(_:))),
+            ("💢  Poke", #selector(friendPoke(_:))),
+            ("💤  Tuck in", #selector(friendNap(_:))),
+          ] as [(String, Selector)] {
+            let m = item(title, sel)
             m.representedObject = f.code
             person.addItem(m)
           }

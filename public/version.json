@@ -1,6 +1,6 @@
 {
-  "version": "0.5.20",
+  "version": "0.5.21",
   "url": "/CoPet.zip",
-  "notes": "Fix Dance to Spotify with Bluetooth headphones; start tap reliably and surface permission errors.",
-  "publishedAt": "2026-10-16T03:42:04Z"
+  "notes": "Remove the Select row from friend menus.",
+  "publishedAt": "2026-10-16T03:45:02Z"
 }

@@ -1402,16 +1402,6 @@ import AppKit
     say("bye bye…")
   }
 
-  @objc private func selectFriend(_ sender: NSMenuItem) {
-    guard let code = sender.representedObject as? String else { return }
-    Online.shared.setActive(code: code)
-    if let f = Online.shared.activeFriend, !f.waiting {
-      logApp("select_friend", code: code, targetName: f.partnerName)
-      say("targeting \(f.partnerName)", seconds: 2)
-    }
-    refreshStatusItem()
-  }
-
   @objc private func removeFriend(_ sender: NSMenuItem) {
     guard let code = sender.representedObject as? String else { return }
     let name = Online.shared.friends.first(where: { $0.code == code })?.partnerName ?? "friend"
@@ -1548,15 +1538,6 @@ import AppKit
             person.addItem(info(act))
           }
           person.addItem(.separator())
-
-          let focus = NSMenuItem(
-            title: "✓  Select",
-            action: #selector(selectFriend(_:)),
-            keyEquivalent: "")
-          focus.target = self
-          focus.representedObject = f.code
-          if f.code == Online.shared.activeCode { focus.state = .on }
-          person.addItem(focus)
 
           for (title, sel) in [
             ("🍖  Feed", #selector(friendFeed(_:))),

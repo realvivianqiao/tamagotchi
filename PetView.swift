@@ -6,9 +6,9 @@ import AppKit
   weak var pet: Pet?
 
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-  override func mouseDown(with event: NSEvent) { pet?.grab() }
+  override func mouseDown(with event: NSEvent) { pet?.grab(clickCount: event.clickCount) }
   override func mouseDragged(with event: NSEvent) { pet?.drag() }
-  override func mouseUp(with event: NSEvent) { pet?.release() }
+  override func mouseUp(with event: NSEvent) { pet?.release(clickCount: event.clickCount) }
 
   override func rightMouseDown(with event: NSEvent) {
     guard let pet else { return }

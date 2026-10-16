@@ -1,6 +1,6 @@
 {
-  "version": "0.3",
+  "version": "0.3.1",
   "url": "/CoPet.zip",
-  "notes": "Gatekeeper help, HTTPS-only ATS, quieter reconnect when Render wakes.",
-  "publishedAt": "2026-10-16T01:37:14Z"
+  "notes": "Double-click the pet to nap; double-click again to wake.",
+  "publishedAt": "2026-10-16T01:39:05Z"
 }

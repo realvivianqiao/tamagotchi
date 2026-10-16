@@ -44,6 +44,7 @@ import AppKit
 
   private var grabStart = CGPoint.zero, lastMouse = CGPoint.zero, grabOffset = CGPoint.zero
   private var swallowRelease = false // double-click nap/wake — don't also pet()
+  private var pendingPetWork: DispatchWorkItem?
   private var lastDragTime: TimeInterval = 0
   private var throwVelocity = CGVector.zero
   private var dragged = false
@@ -635,9 +636,11 @@ import AppKit
 
   // MARK: Mouse
 
-  func grab() {
-    // Double-click → nap / wake (same as menu).
-    if NSApp.currentEvent?.clickCount == 2 {
+  func grab(clickCount: Int = 1) {
+    // Double-click → nap if awake, wake if asleep (same as menu Nap / Wake up).
+    if clickCount >= 2 {
+      pendingPetWork?.cancel()
+      pendingPetWork = nil
       swallowRelease = true
       dragged = false
       toggleNap()
@@ -658,6 +661,8 @@ import AppKit
     if !dragged {
       guard hypot(m.x - grabStart.x, m.y - grabStart.y) > 3 else { return }
       dragged = true
+      pendingPetWork?.cancel()
+      pendingPetWork = nil
       targetX = nil
       activity = .held // untilWoken kept — land() puts them back to sleep
       if Bool.random() {
@@ -678,12 +683,23 @@ import AppKit
     render()
   }
 
-  func release() {
+  func release(clickCount: Int = 1) {
     if swallowRelease {
       swallowRelease = false
       return
     }
-    guard dragged else { return pet() }
+    if !dragged {
+      // Defer pet so a following second click can become nap/wake instead.
+      pendingPetWork?.cancel()
+      let work = DispatchWorkItem { [weak self] in
+        self?.pendingPetWork = nil
+        self?.pet()
+      }
+      pendingPetWork = work
+      let delay = NSEvent.doubleClickInterval
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+      return
+    }
     // Dropped at a screen edge → tuck in for a nap.
     if edgeNapIfNeeded() { return }
     let stale = ProcessInfo.processInfo.systemUptime - lastDragTime > 0.1
@@ -1116,7 +1132,7 @@ import AppKit
       menu.addItem(item("Feed", #selector(feed)))
       menu.addItem(item("Play", #selector(play)))
       menu.addItem(item("Pet", #selector(petFromMenu)))
-      menu.addItem(item(activity == .sleep ? "Wake up" : "Nap", #selector(toggleNap)))
+      menu.addItem(item(isAsleep ? "Wake up" : "Nap", #selector(toggleNap)))
       let speciesItem = NSMenuItem(title: "Choose pet…", action: nil, keyEquivalent: "")
       let speciesMenu = NSMenu()
       for sp in Species.allCases {

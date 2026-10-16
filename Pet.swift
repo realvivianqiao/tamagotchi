@@ -1304,7 +1304,7 @@ import AppKit
 
   @objc private func onlineSetName() {
     if let user = prompt(
-      "Your username",
+      "Username",
       message: "Your name (e.g. Viv Test). Friends see “Username’s Pad” — like Viv Test’s Zuzu.",
       placeholder: Online.shared.ownerName),
        !user.isEmpty
@@ -1314,7 +1314,7 @@ import AppKit
     }
     if let pad = prompt(
       "Pad name",
-      message: "Your pet’s name on this Mac. Defaults: Zuzu (dog), Puff (bird), Bloop (octopus).",
+      message: "Name of this pad. Defaults: Zuzu (dog), Puff (bird), Bloop (octopus).",
       placeholder: Online.shared.padName),
        !pad.isEmpty
     {

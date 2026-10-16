@@ -1,6 +1,6 @@
 {
-  "version": "0.5.10",
+  "version": "0.5.11",
   "url": "/CoPet.zip",
-  "notes": "Friend pads only appear during interactions, then always leave.",
-  "publishedAt": "2026-10-16T03:05:08Z"
+  "notes": "Clarify pad name copy (not \u201cpet name\u201d).",
+  "publishedAt": "2026-10-16T03:07:53Z"
 }

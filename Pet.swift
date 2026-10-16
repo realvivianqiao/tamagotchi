@@ -482,54 +482,47 @@ import AppKit
     }
   }
 
+  private var isAsleep: Bool { untilWoken || activity == .sleep }
+
   private func decay() {
-    fullness = max(0, fullness - 1 / (180 * fps))
-    happiness = max(0, happiness - 1 / (120 * fps))
+    // Asleep: hunger creeps slowly, happiness barely drops (resting).
+    // Awake: both drain over time so they need care.
+    let fullPerSec = isAsleep ? 1.0 / 420.0 : 1.0 / 150.0   // ~7h asleep / ~2.5h awake to empty
+    let happyPerSec = isAsleep ? 1.0 / 900.0 : 1.0 / 100.0  // ~15h asleep / ~1.7h awake to empty
+    fullness = max(0, fullness - fullPerSec / fps)
+    happiness = max(0, happiness - happyPerSec / fps)
     if tick % Int(30 * fps) == 0 {
       save()
       pushOnline()
     }
   }
 
+  /// Periodic check-ins while awake. Silent when you put them to sleep.
   private func chatter() {
-    let chance: Double =
-      switch species {
-      case .octopus: 0.4
-      case .bird: 0.7
-      case .dog: 0.6
-      }
-    guard tick % Int(75 * fps) == 0, activity != .sleep, bubble == nil, Double.random(in: 0..<1) < chance else { return }
-    let hour = Calendar.current.component(.hour, from: Date())
-    let hungry = fullness < 30
-    let sad = happiness < 30
-    let night = hour >= 23 || hour < 6
-    let lines: [String] =
-      if hungry {
-        switch species {
-        case .dog: ["hungry… 🦴?", "ball AND food??"]
-        case .bird: ["SEED", "berry??", "hungry chirp"]
-        case .octopus: ["🦀?", "snack bloop"]
-        }
+    guard !hidden, !isAsleep else { return }
+    let hungry = fullness < 35
+    let sad = happiness < 35
+    let needy = hungry || sad
+    // Needier → talk more often.
+    let interval = Int((needy ? 40.0 : 85.0) * fps)
+    guard tick % interval == 0 else { return }
+    // Don't stomp a gesture bubble that's still being read.
+    if bubble != nil, bubbleTicks > Int(0.8 * fps) { return }
+
+    let chance: Double = needy ? 0.95 : 0.55
+    guard Double.random(in: 0..<1) < chance else { return }
+
+    let pool: [String] =
+      if hungry && sad {
+        PetLines.hungry(species) + PetLines.lonely(species)
+      } else if hungry {
+        PetLines.hungry(species)
       } else if sad {
-        switch species {
-        case .dog: ["play with me…", "pet me? 🥺"]
-        case .bird: ["lonely tweet", "sing with me?"]
-        case .octopus: ["drift alone…", "🫧?"]
-        }
-      } else if night {
-        switch species {
-        case .bird: ["roost time"]
-        case .octopus: ["dark water…"]
-        case .dog: ["sleepy 🌙"]
-        }
+        PetLines.lonely(species)
       } else {
-        switch species {
-        case .dog: ["woof!", "*sniff*", "walk??", "good day!"]
-        case .bird: ["chirp!", "tweet!", "♪", "up up!"]
-        case .octopus: ["bloop", "…", "🫧", "ink later"]
-        }
+        PetLines.checkIn(species)
       }
-    say(PetLines.pick(lines, recent: &recentSays), force: false)
+    say(PetLines.pick(pool, recent: &recentSays), seconds: needy ? 3.5 : 2.8, force: false)
   }
 
   // MARK: Rendering

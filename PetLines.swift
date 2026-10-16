@@ -242,4 +242,102 @@ enum PetLines {
       ]
     }
   }
+
+  // MARK: Periodic check-ins (awake only)
+
+  static func hungry(_ species: Species) -> [String] {
+    switch species {
+    case .dog:
+      return [
+        "feed me…", "hungry!!", "food please?", "my bowl is empty", "snack?",
+        "tummy rumble…", "bone??", "feed buddy", "i'm starving", "dinner time?",
+        "hungry puppy", "treat me?", "need food", "belly empty", "feed feed feed",
+        "nom soon??", "so hungry", "please feed", "food food food", "where's dinner",
+        "hungry… 🥺", "feed me now", "empty tummy", "snack attack incoming", "i need food",
+        "bowl refill?", "starving over here", "feed time!!", "hungry bark", "food??",
+      ]
+    case .bird:
+      return [
+        "SEED", "feed me!!", "berry??", "hungry chirp", "seeds please",
+        "empty feeder", "peckish…", "need crumbs", "feed pip", "hungry bird",
+        "seed emergency", "berry now", "tummy empty", "feed feed", "chirp (hungry)",
+        "where's seed", "so hungry", "refill please", "hungry tweet", "food!",
+        "seed seed seed", "feed me~", "starving", "need snack", "peck for food",
+        "feeder empty!!", "hungry!!", "berry please", "seed time", "feed bird",
+      ]
+    case .octopus:
+      return [
+        "🦀?", "feed me…", "snack bloop", "hungry blob", "crab please",
+        "empty tummy", "need snack", "feed ink", "hungry…", "crab now??",
+        "snack tide", "food please", "bloop (hungry)", "starving squid", "feed me!!",
+        "need crab", "so hungry", "snack??", "belly empty", "feed feed",
+        "hungry arms", "refill please", "crab emergency", "nom soon?", "hungry drift",
+        "food food", "please feed", "snack time", "hungry bloop", "feed octopus",
+      ]
+    }
+  }
+
+  static func lonely(_ species: Species) -> [String] {
+    switch species {
+    case .dog:
+      return [
+        "pet me?", "play with me…", "miss you", "come play!!", "lonely…",
+        "attention please", "scratch my ears?", "bored…", "hey human", "play??",
+        "need pets", "where are you", "sad puppy", "love me?", "hang out?",
+        "i'm bored", "play ball?", "sit with me", "notice me", "hugs?",
+        "feeling blue", "pet please", "play time?", "lonely bark", "miss pets",
+        "come back", "bored dog", "attention!!", "sad…", "play with buddy",
+      ]
+    case .bird:
+      return [
+        "lonely tweet", "sing with me?", "pet fluff?", "bored…", "hey!",
+        "miss you", "play??", "attention please", "chirp for pets", "lonely…",
+        "come perch", "need preening", "where human", "sad tweet", "hang out?",
+        "bored bird", "play time", "notice me", "fluff hugs?", "lonely chirp",
+        "sing please", "pet me~", "miss pets", "hey human", "attention!!",
+        "sad…", "play with pip", "bored!!", "come back", "tweet for love",
+      ]
+    case .octopus:
+      return [
+        "drift alone…", "pet me?", "lonely bloop", "miss you", "play??",
+        "attention please", "bored blob", "hugs?", "where human", "sad…",
+        "need squeeze", "hang out?", "lonely…", "play tide?", "notice me",
+        "bored…", "pet please", "miss pets", "come back", "attention!!",
+        "sad bloop", "play with ink", "lonely drift", "hugs please", "hey!",
+        "bored octopus", "squeeze me", "miss company", "play??", "lonely arms",
+      ]
+    }
+  }
+
+  static func checkIn(_ species: Species) -> [String] {
+    switch species {
+    case .dog:
+      return [
+        "hi!!", "just checking in", "woof!", "you good?", "still here!",
+        "*sniff*", "hey!", "good day!", "thinking of you", "wag wag",
+        "hi human", "what's up", "present!", "hello~", "missed you (kinda)",
+        "boop", "checking in!", "still cute", "hi hi", "status: good boy",
+        "you there?", "wave!", "hi again", "just saying hi", "buddy check-in",
+        "woof (friendly)", "here if you need me", "hi!", "alive and wagging", "hey you",
+      ]
+    case .bird:
+      return [
+        "chirp!", "tweet!", "hi!!", "just checking in", "you good?",
+        "♪", "hey!", "still here!", "hello~", "tweet check-in",
+        "what's up", "hi human", "boop", "chirp chirp", "present!",
+        "hi hi", "status: fluffy", "you there?", "wave wing!", "just saying hi",
+        "pip check-in", "hello!", "still cute", "hey you", "alive and chirping",
+        "hi again", "checking in!", "tweet (friendly)", "here!", "hi~",
+      ]
+    case .octopus:
+      return [
+        "bloop", "hi!!", "just checking in", "you good?", "still here!",
+        "hey!", "hello~", "🫧", "what's up", "hi human",
+        "boop", "present!", "bloop check-in", "hi hi", "status: squishy",
+        "you there?", "wave tentacle", "just saying hi", "ink check-in", "hello!",
+        "still cute", "hey you", "alive and drifting", "hi again", "checking in!",
+        "bloop (friendly)", "here!", "hi~", "…hi", "floating nearby",
+      ]
+    }
+  }
 }

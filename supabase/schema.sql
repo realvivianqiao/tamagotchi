@@ -41,11 +41,14 @@ alter table public.mochi_players enable row level security;
 alter table public.mochi_bonds enable row level security;
 -- Server uses the service role key (bypasses RLS). No anon policies on purpose.
 
--- Product analytics: every meaningful CoPet action (not Mac filesystem/keychain snooping).
+-- Product analytics: every CoPet action with owner + metrics + timestamps.
 -- Run this block once in the Supabase SQL editor if the table isn't there yet.
 create table if not exists public.mochi_events (
   id bigserial primary key,
   created_at timestamptz not null default now(),
+  client_ts timestamptz,
+  owner_device_id text,
+  owner_name text,
   device_id text,
   display_name text,
   event text not null,
@@ -53,11 +56,23 @@ create table if not exists public.mochi_events (
   target_name text,
   species text,
   friend_count integer,
+  fullness double precision,
+  happiness double precision,
+  app_version text,
   payload jsonb not null default '{}'::jsonb
 );
 
+alter table public.mochi_events add column if not exists client_ts timestamptz;
+alter table public.mochi_events add column if not exists owner_device_id text;
+alter table public.mochi_events add column if not exists owner_name text;
+alter table public.mochi_events add column if not exists fullness double precision;
+alter table public.mochi_events add column if not exists happiness double precision;
+alter table public.mochi_events add column if not exists app_version text;
+
 create index if not exists mochi_events_created_idx on public.mochi_events (created_at desc);
+create index if not exists mochi_events_client_ts_idx on public.mochi_events (client_ts desc);
 create index if not exists mochi_events_device_idx on public.mochi_events (device_id);
+create index if not exists mochi_events_owner_idx on public.mochi_events (owner_device_id);
 create index if not exists mochi_events_event_idx on public.mochi_events (event);
 
 alter table public.mochi_events enable row level security;

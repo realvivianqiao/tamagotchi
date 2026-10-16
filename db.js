@@ -176,19 +176,33 @@ export async function getPlayer(deviceId) {
 }
 
 /**
- * Append a product-analytics row. Fire-and-forget from request handlers.
+ * Append a product-analytics row. Always stores owner + timestamps + metrics when provided.
  * Never stores secrets — only CoPet game/UX fields.
  */
 export async function logEvent(evt) {
   if (!supabase) return { ok: false, error: "supabase disabled" };
+  const ownerId = evt.ownerDeviceId || evt.deviceId || null;
+  const ownerName = evt.ownerName || evt.displayName || null;
+  let clientTs = null;
+  if (evt.clientTs) {
+    const d = new Date(evt.clientTs);
+    if (!Number.isNaN(d.getTime())) clientTs = d.toISOString();
+  }
   const row = {
-    device_id: evt.deviceId ? String(evt.deviceId).slice(0, 64) : null,
-    display_name: evt.displayName ? String(evt.displayName).slice(0, 24) : null,
-    event: String(evt.event || "unknown").slice(0, 64),
+    created_at: new Date().toISOString(),
+    client_ts: clientTs,
+    owner_device_id: ownerId ? String(ownerId).slice(0, 64) : null,
+    owner_name: ownerName ? String(ownerName).slice(0, 24) : null,
+    device_id: ownerId ? String(ownerId).slice(0, 64) : null,
+    display_name: ownerName ? String(ownerName).slice(0, 24) : null,
+    event: String(evt.event || "unknown").slice(0, 80),
     code: evt.code ? String(evt.code).toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6) : null,
     target_name: evt.targetName ? String(evt.targetName).slice(0, 24) : null,
     species: evt.species ? String(evt.species).slice(0, 12) : null,
     friend_count: Number.isFinite(evt.friendCount) ? Math.max(0, Math.min(500, evt.friendCount)) : null,
+    fullness: Number.isFinite(evt.fullness) ? Math.max(0, Math.min(100, evt.fullness)) : null,
+    happiness: Number.isFinite(evt.happiness) ? Math.max(0, Math.min(100, evt.happiness)) : null,
+    app_version: evt.appVersion ? String(evt.appVersion).slice(0, 24) : null,
     payload: evt.payload && typeof evt.payload === "object" ? evt.payload : {},
   };
   const { error } = await supabase.from("mochi_events").insert(row);

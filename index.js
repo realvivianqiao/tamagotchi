@@ -16,7 +16,12 @@ import {
 
 /** Best-effort analytics — never blocks the main request path. */
 function track(evt) {
-  logEvent(evt).catch(() => {});
+  logEvent({
+    ...evt,
+    ownerDeviceId: evt.ownerDeviceId || evt.deviceId,
+    ownerName: evt.ownerName || evt.displayName || evt.name,
+    clientTs: evt.clientTs || new Date().toISOString(),
+  }).catch(() => {});
 }
 
 const PORT = Number(process.env.PORT || 3847);
@@ -674,19 +679,25 @@ const httpServer = createServer(async (req, res) => {
     });
   }
 
-  // Client analytics (menu clicks, local gestures). Same fields as server track().
+  // Client analytics (menu clicks, local gestures). Owner + metrics + timestamps required.
   if (req.method === "POST" && url === "/api/event") {
     const body = await readJson(req);
-    const event = String(body.event || "").slice(0, 64);
+    const event = String(body.event || "").slice(0, 80);
     if (!event) return json(res, 400, { error: "event required" });
     track({
-      deviceId: body.deviceId,
-      displayName: body.displayName || body.name,
+      deviceId: body.deviceId || body.ownerDeviceId,
+      displayName: body.displayName || body.ownerName || body.name,
+      ownerDeviceId: body.ownerDeviceId || body.deviceId,
+      ownerName: body.ownerName || body.displayName || body.name,
+      clientTs: body.clientTs || body.timestamp || body.ts,
       event,
       code: body.code,
       targetName: body.targetName,
       species: body.species,
       friendCount: body.friendCount,
+      fullness: body.fullness,
+      happiness: body.happiness,
+      appVersion: body.appVersion || body.version,
       payload: body.payload && typeof body.payload === "object" ? body.payload : {},
     });
     return json(res, 200, { ok: true });
@@ -700,14 +711,30 @@ const httpServer = createServer(async (req, res) => {
     if (!supabaseEnabled) return json(res, 503, { error: "supabase not configured" });
     const row = await getPlayer(deviceId);
     // 404 → client cloudPush registers the pad with the real display name.
-    if (!row) return json(res, 404, { error: "not found", deviceId });
+    if (!row) {
+      track({
+        deviceId, event: "cloud_pull_miss", ownerDeviceId: deviceId,
+        payload: { reason: "not_found" },
+      });
+      return json(res, 404, { error: "not found", deviceId });
+    }
+    const friends = row.friends || [];
+    track({
+      deviceId,
+      displayName: row.display_name,
+      event: "cloud_pull",
+      species: row.species,
+      friendCount: Array.isArray(friends) ? friends.length : 0,
+      fullness: row.fullness,
+      happiness: row.happiness,
+    });
     return json(res, 200, {
       deviceId: row.device_id,
       displayName: row.display_name,
       species: row.species,
       fullness: row.fullness,
       happiness: row.happiness,
-      friends: row.friends || [],
+      friends,
       activeCode: row.active_code,
       updatedAt: row.updated_at,
     });
@@ -805,6 +832,16 @@ const httpServer = createServer(async (req, res) => {
       }
     }
     await saveInvites();
+    track({
+      deviceId,
+      displayName,
+      event: renamed ? "cloud_push_rename" : "cloud_push",
+      species: body.species,
+      friendCount: friends.length,
+      fullness: body.fullness,
+      happiness: body.happiness,
+      payload: { activeCode: body.activeCode || null, renamed: Boolean(renamed) },
+    });
     return json(res, 200, { ok: true, deviceId, friends: friends.length, renamed: Boolean(renamed) });
   }
 
@@ -828,6 +865,12 @@ wss.on("connection", (ws) => {
     // Identify this socket's device (so we can push "someone claimed your code").
     if (msg.type === "hello") {
       ws.deviceId = String(msg.deviceId || "").slice(0, 64) || null;
+      track({
+        deviceId: ws.deviceId,
+        displayName: msg.name,
+        event: "ws_hello",
+        payload: { name: msg.name || null },
+      });
       return send(ws, { type: "hello_ok", deviceId: ws.deviceId });
     }
 
@@ -894,6 +937,17 @@ wss.on("connection", (ws) => {
         if (inv.hostName && inv.guestName) inv.bondedAt = inv.bondedAt || Date.now();
         saveInvites();
       }
+      track({
+        deviceId,
+        displayName: name,
+        event: "ws_attach",
+        code: c,
+        targetName: partnerName || null,
+        species,
+        fullness: msg.fullness,
+        happiness: msg.happiness,
+        friendCount: room.members.size,
+      });
       notifyRoom(room);
       return;
     }
@@ -932,11 +986,23 @@ wss.on("connection", (ws) => {
         );
         notifyRoom(room);
       }
+      track({
+        deviceId,
+        displayName: name,
+        event: "ws_rename",
+        payload: { newName: name },
+      });
       return;
     }
 
     if (msg.type === "detach") {
       const c = String(msg.code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+      track({
+        deviceId: ws.deviceId,
+        displayName: ws.rooms?.get(c),
+        event: "ws_detach",
+        code: c,
+      });
       leaveRoom(ws, c);
       return send(ws, { type: "detached", code: c });
     }

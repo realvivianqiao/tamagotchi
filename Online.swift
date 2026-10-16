@@ -284,19 +284,52 @@ struct FriendBond: Codable, Equatable {
     onPresence?()
   }
 
-  /// Product analytics → `/api/event` → `mochi_events`. Best-effort; never blocks UX.
+  /// Last known pet metrics — attached to every event so Supabase rows are queryable.
+  private(set) var lastFullness: Double = 80
+  private(set) var lastHappiness: Double = 80
+
+  func noteMetrics(fullness: Double, happiness: Double) {
+    lastFullness = fullness
+    lastHappiness = happiness
+  }
+
+  private var appVersion: String {
+    let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+    let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+    return "\(short) (\(build))"
+  }
+
+  /// Product analytics → `/api/event` → `mochi_events`.
+  /// Always includes action owner, client timestamp, and current metrics.
   func track(
     _ event: String,
     code: String? = nil,
     targetName: String? = nil,
+    fullness: Double? = nil,
+    happiness: Double? = nil,
     payload: [String: Any] = [:]
   ) {
+    if let fullness { lastFullness = fullness }
+    if let happiness { lastHappiness = happiness }
+    let iso = ISO8601DateFormatter()
+    iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    var ts = iso.string(from: Date())
+    if ts.isEmpty {
+      iso.formatOptions = [.withInternetDateTime]
+      ts = iso.string(from: Date())
+    }
     var body: [String: Any] = [
       "deviceId": deviceId,
+      "ownerDeviceId": deviceId,
       "displayName": displayName,
+      "ownerName": displayName,
       "event": event,
       "species": mySpecies.rawValue,
       "friendCount": friends.filter { !$0.waiting }.count,
+      "fullness": fullness ?? lastFullness,
+      "happiness": happiness ?? lastHappiness,
+      "clientTs": ts,
+      "appVersion": appVersion,
       "payload": payload,
     ]
     if let code { body["code"] = code }

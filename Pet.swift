@@ -175,6 +175,10 @@ import AppKit
     }
     Online.shared.restoreBondIfAny()
     Updater.shared.start()
+    logApp("app_launch", extra: [
+      "species": species.rawValue,
+      "friendCount": Online.shared.friends.filter { !$0.waiting }.count,
+    ])
   }
 
   private func refreshStatusItem() {
@@ -230,6 +234,7 @@ import AppKit
 
   private func pushOnline(action: String? = nil) {
     guard !applyingRemote else { return }
+    Online.shared.noteMetrics(fullness: fullness, happiness: happiness)
     if Online.shared.isBonded {
       Online.shared.sync(fullness: fullness, happiness: happiness, action: action)
     }
@@ -238,6 +243,27 @@ import AppKit
       lastCloudPush = now
       Online.shared.cloudPush(fullness: fullness, happiness: happiness)
     }
+  }
+
+  /// Every user-facing action → Supabase `mochi_events` with owner + metrics + timestamp.
+  private func logApp(
+    _ event: String,
+    code: String? = nil,
+    targetName: String? = nil,
+    extra: [String: Any] = [:]
+  ) {
+    var payload = extra
+    payload["activity"] = String(describing: activity)
+    payload["asleep"] = untilWoken || activity == .sleep
+    payload["hidden"] = hidden
+    Online.shared.noteMetrics(fullness: fullness, happiness: happiness)
+    Online.shared.track(
+      event,
+      code: code,
+      targetName: targetName,
+      fullness: fullness,
+      happiness: happiness,
+      payload: payload)
   }
 
   // MARK: Loop
@@ -537,6 +563,7 @@ import AppKit
     vy = 0
     bounceCount = 0
     if impact < -6 { squashTicks = max(squashTicks, 6) }
+    logApp("land", extra: ["impact": Double(impact)])
     let vf = screenFrame()
     if untilWoken {
       activity = .sleep
@@ -736,6 +763,7 @@ import AppKit
     grabOffset = CGPoint(x: x - m.x, y: y - m.y)
     throwVelocity = .zero
     dragged = false
+    logApp("grab_start")
   }
 
   func drag() {
@@ -748,6 +776,7 @@ import AppKit
       pendingPetWork = nil
       targetX = nil
       activity = .held // untilWoken kept — land() puts them back to sleep
+      logApp("drag_start")
       if Bool.random() {
         let line: String =
           switch species {
@@ -788,6 +817,7 @@ import AppKit
     let stale = ProcessInfo.processInfo.systemUptime - lastDragTime > 0.1
     let v = stale ? .zero : throwVelocity
     if abs(v.dx) > 1 { dir = v.dx > 0 ? 1 : -1 }
+    logApp("release_throw", extra: ["vx": Double(v.dx), "vy": Double(v.dy)])
     startFall(vx: max(-30, min(30, v.dx)), vy: max(-20, min(25, v.dy)))
   }
 
@@ -804,6 +834,9 @@ import AppKit
     let margin = spriteSize.width / 2 - 8
     if atLeft { x = vf.minX + margin; dir = 1 }
     else if atRight { x = vf.maxX - margin; dir = -1 }
+    logApp("edge_nap", extra: [
+      "edge": atLeft ? "left" : (atRight ? "right" : "bottom"),
+    ])
     enterNap(sayLine: true)
     return true
   }
@@ -848,7 +881,7 @@ import AppKit
   // MARK: Actions
 
   private func pet() {
-    Online.shared.track("self_pet", payload: ["fullness": fullness, "happiness": happiness])
+    logApp("self_pet")
     _ = wakeIfNapping()
     happiness = min(100, happiness + 6)
     happyTicks = Int(2.5 * fps)
@@ -871,7 +904,7 @@ import AppKit
   }
 
   @objc private func feed() {
-    Online.shared.track("self_feed", payload: ["fullness": fullness, "happiness": happiness])
+    logApp("self_feed")
     // Always feed *your* pet — never no-op. Full pets still eat (second breakfast).
     _ = wakeIfNapping()
     let wasFull = fullness >= 95
@@ -888,7 +921,7 @@ import AppKit
   }
 
   @objc private func play() {
-    Online.shared.track("self_play", payload: ["fullness": fullness, "happiness": happiness])
+    logApp("self_play")
     _ = wakeIfNapping()
     happiness = min(100, happiness + 12)
     fullness = max(0, fullness - 3)
@@ -942,7 +975,7 @@ import AppKit
   }
 
   @objc private func toggleNap() {
-    Online.shared.track(untilWoken || activity == .sleep ? "self_wake" : "self_nap")
+    logApp(untilWoken || activity == .sleep ? "self_wake" : "self_nap")
     if untilWoken || activity == .sleep {
       wakeStickyNap()
       let first = Ambient.shared.wakeLine(species: species)
@@ -962,9 +995,7 @@ import AppKit
   /// Carries *your* stats only so they can refresh your FriendBond row — never renames anyone.
   private func sendToFriend(action: String, code: String, name: String) {
     Online.shared.setActive(code: code)
-    Online.shared.track(
-      "menu_friend_\(action)", code: code, targetName: name,
-      payload: ["friendCount": Online.shared.friends.filter { !$0.waiting }.count])
+    logApp("menu_friend_\(action)", code: code, targetName: name)
     Online.shared.sync(fullness: fullness, happiness: happiness, action: action, toCode: code)
     let friendSpecies =
       Online.shared.friends.first(where: { $0.code == code })?.petSpecies ?? .dog
@@ -991,6 +1022,9 @@ import AppKit
     let visitCode = bond?.code ?? code ?? "visit"
     let visitName = bond?.partnerName.isEmpty == false ? bond!.partnerName : fromName
     let visitSpecies = bond?.petSpecies ?? species
+    logApp(
+      "visit_received_\(action)", code: visitCode, targetName: visitName,
+      extra: ["fromSpecies": visitSpecies.rawValue])
     let label = Self.visitLabel(
       actor: visitName, action: action, toward: "you", incoming: true)
     presentVisit(
@@ -1121,7 +1155,7 @@ import AppKit
     guard let raw = sender.representedObject as? String,
           let next = Species(rawValue: raw)
     else { return }
-    Online.shared.track("choose_species", payload: ["from": species.rawValue, "to": next.rawValue])
+    logApp("choose_species", extra: ["from": species.rawValue, "to": next.rawValue])
     let oldDefault = species.defaultName
     species = next
     Online.shared.mySpecies = next
@@ -1140,6 +1174,8 @@ import AppKit
     guard let code = sender.representedObject as? String,
           let f = Online.shared.friends.first(where: { $0.code == code }), !f.waiting
     else { return }
+    logApp("show_friend", code: code, targetName: f.partnerName,
+           extra: ["species": f.petSpecies.rawValue])
     visitor?.dismiss()
     let v = FriendVisitor(code: code, name: f.partnerName, species: f.petSpecies, near: x)
     v.hostX = { [weak self] in self?.x ?? 0 }
@@ -1156,6 +1192,7 @@ import AppKit
 
   @objc private func hideVisitor() {
     guard visitor != nil else { return }
+    logApp("hide_friend", code: visitor?.code, targetName: visitor?.name)
     visitor?.dismiss()
     visitor = nil
     say("visitor left", seconds: 1.5)
@@ -1219,12 +1256,13 @@ import AppKit
   @objc private func petFromMenu() { pet() }
 
   @objc private func pokeSelf() {
-    Online.shared.track("self_poke")
+    logApp("self_poke")
     getAngry(fromPoke: true)
     pushOnline()
   }
 
   @objc private func quit() {
+    logApp("app_quit")
     save()
     Online.shared.disconnect()
     NSApp.terminate(nil)
@@ -1234,12 +1272,15 @@ import AppKit
 
   @objc private func onlineShareCode() {
     ensureDisplayName()
+    logApp("menu_share_code")
     Online.shared.shareMyCode(fullness: fullness, happiness: happiness) { [weak self] code in
       guard let self else { return }
       guard let code else {
+        self.logApp("share_code_fail")
         self.alert("Couldn’t reach the server.\nCheck your internet and try again.")
         return
       }
+      self.logApp("share_code_ok", code: code)
       let site = "https://tamagotchi-udtz.onrender.com"
       let msg = """
       CoPet code \(code)
@@ -1264,11 +1305,14 @@ import AppKit
       placeholder: "")
     guard let code, !code.isEmpty else { return }
     let token = Online.extractCode(code)
+    logApp("menu_claim", code: token)
     onlineNote = "joining \(token)…"
     Online.shared.join(code: token)
   }
 
   @objc private func onlineLeave() {
+    logApp("menu_leave_all_bonds",
+           extra: ["friendCount": Online.shared.friends.count])
     Online.shared.leaveAllBonds()
     onlineNote = nil
     partnerWasOnline = false
@@ -1280,6 +1324,7 @@ import AppKit
     guard let code = sender.representedObject as? String else { return }
     Online.shared.setActive(code: code)
     if let f = Online.shared.activeFriend, !f.waiting {
+      logApp("select_friend", code: code, targetName: f.partnerName)
       say("targeting \(f.partnerName)", seconds: 2)
     }
     refreshStatusItem()
@@ -1287,6 +1332,8 @@ import AppKit
 
   @objc private func removeFriend(_ sender: NSMenuItem) {
     guard let code = sender.representedObject as? String else { return }
+    let name = Online.shared.friends.first(where: { $0.code == code })?.partnerName
+    logApp("remove_friend", code: code, targetName: name)
     Online.shared.removeFriend(code: code)
     refreshStatusItem()
   }
@@ -1298,6 +1345,7 @@ import AppKit
       placeholder: Online.shared.displayName),
        !name.isEmpty
     {
+      logApp("rename", extra: ["newName": name])
       Online.shared.displayName = name
       refreshStatusItem()
     }
@@ -1460,6 +1508,7 @@ import AppKit
   }
 
   @objc private func checkForUpdates() {
+    logApp("check_for_updates")
     Updater.shared.checkNow()
   }
 

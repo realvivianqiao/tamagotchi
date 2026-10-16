@@ -7,6 +7,7 @@ import {
   supabaseEnabled,
   loadBondsFromSupabase,
   saveBondToSupabase,
+  renameDeviceOnBonds,
   upsertPlayer,
   getPlayer,
 } from "./db.js";
@@ -24,7 +25,7 @@ const EMPTY_ROOM_TTL_MS = 2 * 60 * 60 * 1000;
 /** Live WS rooms (ephemeral — fine to lose; clients re-attach) */
 const rooms = new Map();
 /** Invite / bond directory — best-effort durable on disk */
-/** @type {Map<string, {hostName:?string, guestName:?string, fullness:number, happiness:number, createdAt:number, bondedAt:?number}>} */
+/** @type {Map<string, {hostName:?string, guestName:?string, hostDeviceId:?string, guestDeviceId:?string, fullness:number, happiness:number, createdAt:number, bondedAt:?number}>} */
 const invites = new Map();
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -60,11 +61,16 @@ function uniqueCode() {
 
 function inviteAlive(inv, now = Date.now()) {
   if (!inv) return false;
-  if (inv.guestName) {
+  // Bonded once a guest name or guest device is locked in.
+  if (inv.guestName || inv.guestDeviceId) {
     const t = inv.bondedAt || inv.createdAt || 0;
     return now - t < BOND_TTL_MS;
   }
   return now - (inv.createdAt || 0) < WAITING_TTL_MS;
+}
+
+function isBonded(inv) {
+  return Boolean(inv && (inv.guestDeviceId || inv.guestName));
 }
 
 async function loadInvites() {
@@ -107,21 +113,47 @@ async function saveInvites() {
 }
 
 /** Upsert a bond/invite record from client memory (source of truth after redeploys). */
-function upsertInvite(c, { hostName, guestName, fullness, happiness, preserveGuest = true }) {
+function upsertInvite(
+  c,
+  {
+    hostName,
+    guestName,
+    hostDeviceId,
+    guestDeviceId,
+    fullness,
+    happiness,
+    preserveGuest = true,
+  },
+) {
   const prev = invites.get(c);
   const inv = {
     hostName: hostName || prev?.hostName || null,
     guestName: preserveGuest
       ? guestName || prev?.guestName || null
       : guestName ?? null,
+    hostDeviceId: hostDeviceId || prev?.hostDeviceId || null,
+    guestDeviceId: preserveGuest
+      ? guestDeviceId || prev?.guestDeviceId || null
+      : guestDeviceId ?? null,
     fullness: Number.isFinite(fullness) ? fullness : prev?.fullness ?? 80,
     happiness: Number.isFinite(happiness) ? happiness : prev?.happiness ?? 80,
     createdAt: prev?.createdAt || Date.now(),
     bondedAt: prev?.bondedAt || null,
   };
-  if (inv.hostName && inv.guestName && !inv.bondedAt) inv.bondedAt = Date.now();
+  if ((inv.hostName && inv.guestName) || inv.guestDeviceId) {
+    if (!inv.bondedAt) inv.bondedAt = Date.now();
+  }
   invites.set(c, inv);
   return inv;
+}
+
+/** Keep in-memory bond names in sync when a device renames. */
+function renameDeviceInMemory(deviceId, newName) {
+  if (!deviceId || !newName) return;
+  for (const inv of invites.values()) {
+    if (inv.hostDeviceId === deviceId) inv.hostName = newName;
+    if (inv.guestDeviceId === deviceId) inv.guestName = newName;
+  }
 }
 
 function ensureRoomMaps(room) {
@@ -311,26 +343,58 @@ const httpServer = createServer(async (req, res) => {
   }
 
   // Create / restore a waiting invite. Body.code reuses a known code (client heal).
+  // One device = one host pad; deviceId is stored so the bond survives app updates.
   if (req.method === "POST" && url === "/api/invite") {
     const body = await readJson(req);
     const name = String(body.name || "friend").slice(0, 24);
+    const deviceId = String(body.deviceId || "").slice(0, 64) || null;
     const wanted = String(body.code || "")
       .toUpperCase()
       .replace(/[^A-Z0-9]/g, "")
       .slice(0, 6);
     const usable = isValidCode(wanted);
     const c = usable ? wanted : uniqueCode();
+    const prev = invites.get(c);
+    // If this code is already bonded to someone else, don't let a new invite wipe it.
+    if (usable && isBonded(prev)) {
+      const sameHost =
+        (deviceId && prev.hostDeviceId === deviceId) ||
+        (!deviceId && prev.hostName === name);
+      if (!sameHost) {
+        return json(res, 409, { error: "already bonded", code: c });
+      }
+      // Host re-advertising an existing bond — keep guest lock, refresh host name/device.
+      const inv = upsertInvite(c, {
+        hostName: name,
+        hostDeviceId: deviceId,
+        fullness: body.fullness,
+        happiness: body.happiness,
+        preserveGuest: true,
+      });
+      ensureRoom(c, { createIfMissing: true });
+      await saveInvites();
+      return json(res, 200, {
+        code: c,
+        hostName: inv.hostName,
+        guestName: inv.guestName,
+        bonded: true,
+      });
+    }
     const inv = upsertInvite(c, {
       hostName: name,
+      hostDeviceId: deviceId,
       guestName: usable ? null : undefined,
+      guestDeviceId: usable ? null : undefined,
       fullness: body.fullness,
       happiness: body.happiness,
       preserveGuest: !usable,
     });
-    if (usable) {
+    if (usable && !isBonded(inv)) {
       inv.guestName = null;
+      inv.guestDeviceId = null;
       inv.bondedAt = null;
     }
+    if (deviceId) inv.hostDeviceId = deviceId;
     const room = ensureRoom(c, { createIfMissing: true });
     if (room) {
       room.stats.set(name, {
@@ -348,20 +412,35 @@ const httpServer = createServer(async (req, res) => {
     const body = await readJson(req);
     const c = String(body.code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
     const name = String(body.name || "friend").slice(0, 24);
+    const deviceId = String(body.deviceId || "").slice(0, 64) || null;
     const partner = String(body.partnerName || "").slice(0, 24);
     if (!isValidCode(c)) return json(res, 400, { error: "bad code" });
     const prev = invites.get(c);
     let hostName = prev?.hostName || name;
     let guestName = prev?.guestName || null;
-    if (hostName === name) {
+    let hostDeviceId = prev?.hostDeviceId || null;
+    let guestDeviceId = prev?.guestDeviceId || null;
+    if (deviceId && prev?.hostDeviceId === deviceId) {
+      hostName = name;
+      hostDeviceId = deviceId;
+      if (partner && partner !== name) guestName = partner;
+    } else if (deviceId && prev?.guestDeviceId === deviceId) {
+      guestName = name;
+      guestDeviceId = deviceId;
+      if (partner && partner !== name) hostName = partner;
+    } else if (hostName === name) {
+      hostDeviceId = deviceId || hostDeviceId;
       if (partner && partner !== name) guestName = partner;
     } else {
       guestName = name;
+      guestDeviceId = deviceId || guestDeviceId;
       if (partner && partner !== name) hostName = partner;
     }
     const inv = upsertInvite(c, {
       hostName,
       guestName,
+      hostDeviceId,
+      guestDeviceId,
       fullness: body.fullness,
       happiness: body.happiness,
       preserveGuest: true,
@@ -377,16 +456,39 @@ const httpServer = createServer(async (req, res) => {
     });
   }
 
+  // Claim once per invite. Same guest device may re-claim (idempotent); other devices get 409.
   if (req.method === "POST" && url === "/api/claim") {
     const body = await readJson(req);
     const c = String(body.code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
     const name = String(body.name || "friend").slice(0, 24);
+    const deviceId = String(body.deviceId || "").slice(0, 64) || null;
     const inv = invites.get(c);
     if (!inv) return json(res, 404, { error: "room not found", code: c });
+    if (deviceId && inv.hostDeviceId && inv.hostDeviceId === deviceId) {
+      return json(res, 400, { error: "that's your own invite", code: c });
+    }
+    if (inv.guestDeviceId) {
+      if (deviceId && inv.guestDeviceId === deviceId) {
+        inv.guestName = name;
+        await saveInvites();
+        ensureRoom(c, { createIfMissing: true });
+        return json(res, 200, {
+          code: c,
+          hostName: inv.hostName,
+          guestName: name,
+          fullness: inv.fullness,
+          happiness: inv.happiness,
+          alreadyBonded: true,
+        });
+      }
+      return json(res, 409, { error: "already bonded", code: c });
+    }
+    // Legacy name lock (no device id yet) — still bond-once.
     if (inv.guestName && inv.guestName !== name) {
-      return json(res, 409, { error: "room full", code: c });
+      return json(res, 409, { error: "already bonded", code: c });
     }
     inv.guestName = name;
+    if (deviceId) inv.guestDeviceId = deviceId;
     inv.bondedAt = Date.now();
     ensureRoom(c, { createIfMissing: true });
     await saveInvites();
@@ -409,13 +511,14 @@ const httpServer = createServer(async (req, res) => {
     });
   }
 
-  // Pull cloud profile + friends (Supabase). deviceId is a stable UUID on each Mac.
+  // Pull cloud profile + friends. deviceId is the stable pad key (one Mac = one user).
   if (req.method === "GET" && url === "/api/me") {
     const q = new URL(req.url || "/", "http://x").searchParams;
     const deviceId = String(q.get("deviceId") || "").slice(0, 64);
     if (!deviceId) return json(res, 400, { error: "deviceId required" });
     if (!supabaseEnabled) return json(res, 503, { error: "supabase not configured" });
     const row = await getPlayer(deviceId);
+    // 404 → client cloudPush registers the pad with the real display name.
     if (!row) return json(res, 404, { error: "not found", deviceId });
     return json(res, 200, {
       deviceId: row.device_id,
@@ -429,12 +532,14 @@ const httpServer = createServer(async (req, res) => {
     });
   }
 
-  // Push cloud profile + friends — this is the durable source of truth.
+  // Push cloud profile + friends — durable pad + bond history for this device.
   if (req.method === "POST" && url === "/api/me") {
     const body = await readJson(req);
     const deviceId = String(body.deviceId || "").slice(0, 64);
     if (!deviceId) return json(res, 400, { error: "deviceId required" });
     if (!supabaseEnabled) return json(res, 503, { error: "supabase not configured" });
+    const displayName = String(body.displayName || "me").slice(0, 24);
+    const prev = await getPlayer(deviceId);
     const friends = Array.isArray(body.friends)
       ? body.friends.map((f) => ({
           code: String(f.code || "").toUpperCase().slice(0, 6),
@@ -449,7 +554,7 @@ const httpServer = createServer(async (req, res) => {
       : [];
     const result = await upsertPlayer({
       deviceId,
-      displayName: body.displayName,
+      displayName,
       species: body.species,
       fullness: body.fullness,
       happiness: body.happiness,
@@ -457,36 +562,69 @@ const httpServer = createServer(async (req, res) => {
       activeCode: body.activeCode,
     });
     if (!result.ok) return json(res, 500, { error: result.error });
-    // Also upsert any bond codes into mochi_bonds so invite directory stays warm.
+    // Name change → update every bond row where this device is host or guest.
+    const renamed = prev && prev.display_name !== displayName;
+    if (renamed) {
+      renameDeviceInMemory(deviceId, displayName);
+      await renameDeviceOnBonds(deviceId, displayName);
+    }
+    // Warm invite directory from this pad's friend list (never wipe an existing guest lock).
     for (const f of friends) {
       if (!isValidCode(f.code)) continue;
       const existing = invites.get(f.code);
       if (f.waiting) {
-        upsertInvite(f.code, {
-          hostName: body.displayName,
-          guestName: null,
-          fullness: f.fullness,
-          happiness: f.happiness,
-          preserveGuest: false,
-        });
-        const inv = invites.get(f.code);
-        if (inv) {
-          inv.guestName = null;
-          inv.hostDeviceId = deviceId;
+        if (isBonded(existing) && existing.hostDeviceId && existing.hostDeviceId !== deviceId) {
+          continue;
+        }
+        if (isBonded(existing) && existing.hostDeviceId === deviceId) {
+          upsertInvite(f.code, {
+            hostName: displayName,
+            hostDeviceId: deviceId,
+            fullness: f.fullness,
+            happiness: f.happiness,
+            preserveGuest: true,
+          });
+        } else {
+          upsertInvite(f.code, {
+            hostName: displayName,
+            hostDeviceId: deviceId,
+            guestName: null,
+            guestDeviceId: null,
+            fullness: f.fullness,
+            happiness: f.happiness,
+            preserveGuest: false,
+          });
         }
       } else {
-        upsertInvite(f.code, {
-          hostName: existing?.hostName || body.displayName,
-          guestName: f.partnerName,
-          fullness: f.fullness,
-          happiness: f.happiness,
-        });
+        const asHost =
+          !existing?.guestDeviceId ||
+          existing.hostDeviceId === deviceId ||
+          existing.hostName === displayName;
+        if (asHost) {
+          upsertInvite(f.code, {
+            hostName: displayName,
+            guestName: f.partnerName,
+            hostDeviceId: deviceId,
+            fullness: f.fullness,
+            happiness: f.happiness,
+            preserveGuest: true,
+          });
+        } else {
+          upsertInvite(f.code, {
+            hostName: existing?.hostName || f.partnerName,
+            guestName: displayName,
+            guestDeviceId: deviceId,
+            fullness: f.fullness,
+            happiness: f.happiness,
+            preserveGuest: true,
+          });
+        }
         const inv = invites.get(f.code);
         if (inv && !inv.bondedAt) inv.bondedAt = Date.now();
       }
     }
     await saveInvites();
-    return json(res, 200, { ok: true, deviceId, friends: friends.length });
+    return json(res, 200, { ok: true, deviceId, friends: friends.length, renamed: Boolean(renamed) });
   }
 
   return serveStatic(req, res);
@@ -507,10 +645,11 @@ wss.on("connection", (ws) => {
     }
 
     // Attach to a friend room (one socket can be in many rooms).
-    // Valid codes recreate rooms even after a wipe — bond lives on the client.
+    // Valid codes recreate rooms even after a wipe — bond lives on the client + Supabase.
     if (msg.type === "attach" || msg.type === "join") {
       const c = String(msg.code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
       const name = String(msg.name || "friend").slice(0, 24);
+      const deviceId = String(msg.deviceId || "").slice(0, 64) || null;
       const species = String(msg.species || "dog").toLowerCase().slice(0, 12);
       const partnerName = String(msg.partnerName || "").slice(0, 24);
       if (!isValidCode(c)) return send(ws, { type: "error", text: "bad code", code: c });
@@ -519,6 +658,7 @@ wss.on("connection", (ws) => {
         upsertInvite(c, {
           hostName: invites.get(c)?.hostName || name,
           guestName: partnerName || invites.get(c)?.guestName || null,
+          hostDeviceId: invites.get(c)?.hostDeviceId || deviceId,
           fullness: Number.isFinite(msg.fullness) ? msg.fullness : undefined,
           happiness: Number.isFinite(msg.happiness) ? msg.happiness : undefined,
         });
@@ -527,11 +667,19 @@ wss.on("connection", (ws) => {
       const room = ensureRoom(c, { createIfMissing: true });
       if (!room) return send(ws, { type: "error", text: "room not found", code: c });
       if (room.members.size >= 2 && ![...room.members.values()].includes(name)) {
-        return send(ws, { type: "error", text: "already bonded (2 people max)", code: c });
+        // Allow re-attach if same device reconnects under a new display name.
+        const inv = invites.get(c);
+        const known =
+          deviceId &&
+          (inv?.hostDeviceId === deviceId || inv?.guestDeviceId === deviceId);
+        if (!known) {
+          return send(ws, { type: "error", text: "already bonded (2 people max)", code: c });
+        }
       }
       ensureRoomMaps(room);
+      ws.deviceId = deviceId;
       for (const [peer, n] of [...room.members]) {
-        if (n === name && peer !== ws) {
+        if ((n === name || (deviceId && peer.deviceId === deviceId)) && peer !== ws) {
           room.members.delete(peer);
           if (peer.rooms) peer.rooms.delete(c);
         }
@@ -545,12 +693,58 @@ wss.on("connection", (ws) => {
       ws.room = room;
       const inv = invites.get(c);
       if (inv) {
-        if (!inv.hostName) inv.hostName = name;
-        else if (name !== inv.hostName) inv.guestName = name;
+        if (deviceId && inv.hostDeviceId === deviceId) {
+          inv.hostName = name;
+        } else if (deviceId && inv.guestDeviceId === deviceId) {
+          inv.guestName = name;
+        } else if (!inv.hostName) {
+          inv.hostName = name;
+          if (deviceId) inv.hostDeviceId = deviceId;
+        } else if (name !== inv.hostName) {
+          inv.guestName = name;
+          if (deviceId) inv.guestDeviceId = deviceId;
+        }
         if (inv.hostName && inv.guestName) inv.bondedAt = inv.bondedAt || Date.now();
         saveInvites();
       }
       notifyRoom(room);
+      return;
+    }
+
+    // Display-name change: update bond rows + tell partners so their Friends list stays current.
+    if (msg.type === "rename") {
+      const name = String(msg.name || "").slice(0, 24);
+      const deviceId = String(msg.deviceId || "").slice(0, 64) || ws.deviceId || null;
+      if (!name) return;
+      ws.deviceId = deviceId || ws.deviceId;
+      if (deviceId) {
+        renameDeviceInMemory(deviceId, name);
+        renameDeviceOnBonds(deviceId, name).catch(() => {});
+        saveInvites();
+      }
+      for (const [c, oldName] of [...ws.rooms]) {
+        const room = rooms.get(c);
+        if (!room || !room.members.has(ws)) continue;
+        ensureRoomMaps(room);
+        const prevStats = room.stats.get(oldName);
+        const prevSpecies = room.species.get(oldName);
+        room.members.set(ws, name);
+        ws.rooms.set(c, name);
+        if (prevStats) {
+          room.stats.delete(oldName);
+          room.stats.set(name, prevStats);
+        }
+        if (prevSpecies) {
+          room.species.delete(oldName);
+          room.species.set(name, prevSpecies);
+        }
+        broadcast(
+          room,
+          { type: "rename", code: c, name, from: oldName, deviceId: deviceId || null },
+          ws,
+        );
+        notifyRoom(room);
+      }
       return;
     }
 

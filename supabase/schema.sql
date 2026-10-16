@@ -1,9 +1,10 @@
--- Mochi cloud state (run once in Supabase SQL editor)
--- Org: bhghwildwmmodloukxvd
+-- CoPet cloud state (run once in Supabase SQL editor)
+-- Model: one Mac = one device_id = one player "pad".
+-- Bonds are created once (invite → claim). Names update in place when a device renames.
 
 create extension if not exists "pgcrypto";
 
--- Per-device player profile + friend list (source of truth across Macs / reinstalls)
+-- Per-device player profile + friend list (survives app updates / reinstalls)
 create table if not exists public.mochi_players (
   device_id text primary key,
   display_name text not null default 'me',
@@ -15,7 +16,7 @@ create table if not exists public.mochi_players (
   updated_at timestamptz not null default now()
 );
 
--- Invite / bond directory (survives Render redeploys)
+-- Invite / bond directory (one code = one pair; host/guest device ids lock the bond)
 create table if not exists public.mochi_bonds (
   code text primary key,
   host_name text,

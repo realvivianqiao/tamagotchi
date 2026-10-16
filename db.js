@@ -88,6 +88,20 @@ export async function saveBondToSupabase(code, inv) {
   if (error) console.warn("supabase save bond:", error.message);
 }
 
+/** When a device renames, keep bond host/guest names in sync. */
+export async function renameDeviceOnBonds(deviceId, newName) {
+  if (!supabase || !deviceId || !newName) return;
+  const name = String(newName).slice(0, 24);
+  for (const col of ["host_device_id", "guest_device_id"]) {
+    const nameCol = col.startsWith("host") ? "host_name" : "guest_name";
+    const { error } = await supabase
+      .from("mochi_bonds")
+      .update({ [nameCol]: name, updated_at: new Date().toISOString() })
+      .eq(col, deviceId);
+    if (error) console.warn(`supabase rename bonds (${col}):`, error.message);
+  }
+}
+
 export async function deleteBondFromSupabase(code) {
   if (!supabase) return;
   const { error } = await supabase.from("mochi_bonds").delete().eq("code", code);

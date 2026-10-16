@@ -72,8 +72,39 @@ struct FriendBond: Codable, Equatable {
     return URL(string: s) ?? httpBase
   }
 
-  /// Stable id for this Mac — used as the Supabase player primary key.
+  /// Old bundle id used UserDefaults under this suite — migrate so CoPet keeps the same pad.
+  private static let legacySuiteName = "com.vivianqiao.mochi"
+  private static let migrateKeys = [
+    "mochiDeviceId", "mochiName", "mochiSpecies", "mochiFriends", "mochiActiveCode",
+    "mochiBondCode", "mochiBondPartner", "mochiStickyNap", "mochiNapX", "mochiNapY",
+    "fullness", "happiness", "savedAt", "mochiServer",
+  ]
+
+  private static func migrateLegacyDefaultsIfNeeded() {
+    let d = UserDefaults.standard
+    if d.bool(forKey: "mochiMigratedFromMochi") { return }
+    defer { d.set(true, forKey: "mochiMigratedFromMochi") }
+    guard let legacy = UserDefaults(suiteName: legacySuiteName) else { return }
+    let legacyId = legacy.string(forKey: "mochiDeviceId") ?? ""
+    let currentId = d.string(forKey: "mochiDeviceId") ?? ""
+    // Prefer the old pad id so cloud bond history stays on this Mac after the CoPet rename.
+    if !legacyId.isEmpty {
+      let hasLocalFriends = d.data(forKey: "mochiFriends") != nil
+      if currentId.isEmpty || (!hasLocalFriends && currentId != legacyId) {
+        d.set(legacyId, forKey: "mochiDeviceId")
+      }
+    }
+    for key in migrateKeys where key != "mochiDeviceId" {
+      if d.object(forKey: key) != nil { continue }
+      if let val = legacy.object(forKey: key) {
+        d.set(val, forKey: key)
+      }
+    }
+  }
+
+  /// Stable id for this Mac — one device = one user pad in Supabase (survives app updates).
   var deviceId: String {
+    Self.migrateLegacyDefaultsIfNeeded()
     let key = "mochiDeviceId"
     if let existing = UserDefaults.standard.string(forKey: key), !existing.isEmpty {
       return existing
@@ -89,8 +120,13 @@ struct FriendBond: Codable, Equatable {
       return (n?.isEmpty == false) ? n! : NSFullUserName().split(separator: " ").first.map(String.init) ?? "me"
     }
     set {
-      UserDefaults.standard.set(newValue, forKey: "mochiName")
+      let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+      let old = UserDefaults.standard.string(forKey: "mochiName")
+      UserDefaults.standard.set(trimmed, forKey: "mochiName")
       cloudPush(fullness: nil, happiness: nil)
+      if old != trimmed {
+        broadcastRename(trimmed)
+      }
     }
   }
 
@@ -138,10 +174,26 @@ struct FriendBond: Codable, Equatable {
     Task { @MainActor in
       do {
         let res = try await postJSON(path: "/api/invite", body: [
-          "name": displayName, "fullness": fullness, "happiness": happiness,
+          "name": displayName,
+          "deviceId": deviceId,
+          "fullness": fullness,
+          "happiness": happiness,
         ])
         guard let c = res["code"] as? String else {
           onStatus?("invite failed")
+          return
+        }
+        // Bond once: if this code was already claimed, just reopen that friend row.
+        if let guest = res["guestName"] as? String, !guest.isEmpty, res["bonded"] as? Bool == true {
+          upsert(FriendBond(
+            code: c, partnerName: guest, online: false, waiting: false,
+            fullness: fullness, happiness: happiness, lastActivity: "already bonded"))
+          activeCode = c
+          saveFriends()
+          onStatus?("bonded with \(guest)")
+          onFriendsChanged?()
+          ensureSocket()
+          attach(code: c)
           return
         }
         upsert(FriendBond(
@@ -161,10 +213,22 @@ struct FriendBond: Codable, Equatable {
 
   func join(code raw: String) {
     let token = Self.extractCode(raw)
+    // Already on this pad — bonding is once; just focus that friend.
+    if let existing = friends.first(where: { $0.code == token && !$0.waiting }) {
+      setActive(code: existing.code)
+      onStatus?("already bonded with \(existing.partnerName)")
+      ensureSocket()
+      attach(code: existing.code)
+      return
+    }
     onStatus?("claiming \(token)…")
     Task { @MainActor in
       do {
-        let res = try await postJSON(path: "/api/claim", body: ["name": displayName, "code": token])
+        let res = try await postJSON(path: "/api/claim", body: [
+          "name": displayName,
+          "deviceId": deviceId,
+          "code": token,
+        ])
         if let err = res["error"] as? String {
           onStatus?(err)
           return
@@ -175,7 +239,8 @@ struct FriendBond: Codable, Equatable {
         upsert(FriendBond(
           code: (res["code"] as? String) ?? token,
           partnerName: host, online: false, waiting: false,
-          fullness: f, happiness: h, lastActivity: "just bonded"))
+          fullness: f, happiness: h,
+          lastActivity: (res["alreadyBonded"] as? Bool == true) ? "reconnected" : "just bonded"))
         activeCode = (res["code"] as? String) ?? token
         saveFriends()
         onStatus?("bonded with \(host)")
@@ -248,16 +313,34 @@ struct FriendBond: Codable, Equatable {
   }
 
   func restoreBondIfAny() {
+    _ = deviceId // ensure pad id exists + legacy migrate before cloud talk
     loadFriends()
     Task { @MainActor in
       await cloudPull()
-      guard !friends.isEmpty else { return }
+      // Always register this device pad in the DB, even with an empty friends list.
+      cloudPush(fullness: nil, happiness: nil)
+      guard !friends.isEmpty else {
+        onStatus?("pad ready")
+        return
+      }
       if activeCode == nil { activeCode = friends.first?.code }
       onFriendsChanged?()
       onPresence?()
       ensureSocket()
       for f in friends { attach(code: f.code) }
-      cloudPush(fullness: nil, happiness: nil)
+    }
+  }
+
+  /// Tell bonded partners our new display name so their Friends list updates live.
+  private func broadcastRename(_ name: String) {
+    guard connected, !friends.isEmpty else { return }
+    for f in friends {
+      send([
+        "type": "rename",
+        "code": f.code,
+        "name": name,
+        "deviceId": deviceId,
+      ])
     }
   }
 
@@ -353,7 +436,11 @@ struct FriendBond: Codable, Equatable {
     do {
       let res = try await getJSON(path: "/api/me?deviceId=\(deviceId)")
       if let name = res["displayName"] as? String, !name.isEmpty {
-        UserDefaults.standard.set(name, forKey: "mochiName")
+        let local = UserDefaults.standard.string(forKey: "mochiName")
+        // Don't let a placeholder cloud row clobber a real local name.
+        if local == nil || local?.isEmpty == true || name != "me" {
+          UserDefaults.standard.set(name, forKey: "mochiName")
+        }
       }
       if let sp = res["species"] as? String, !sp.isEmpty {
         UserDefaults.standard.set(sp, forKey: "mochiSpecies")
@@ -448,6 +535,7 @@ struct FriendBond: Codable, Equatable {
       try? await Task.sleep(nanoseconds: 300_000_000)
       var msg: [String: Any] = [
         "type": "attach", "code": code, "name": displayName,
+        "deviceId": deviceId,
         "species": mySpecies.rawValue,
         "fullness": friends.first(where: { $0.code == code })?.fullness ?? 80,
         "happiness": friends.first(where: { $0.code == code })?.happiness ?? 80,
@@ -497,6 +585,27 @@ struct FriendBond: Codable, Equatable {
       applyRoom(json)
     case "presence":
       applyPresence(json)
+    case "rename":
+      // Partner changed their pet name — update local friend row + cloud.
+      let code = json["code"] as? String
+      let newName = (json["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      let from = (json["from"] as? String) ?? ""
+      guard !newName.isEmpty, newName != displayName else { break }
+      if let code, let i = friends.firstIndex(where: { $0.code == code }) {
+        if friends[i].partnerName == from || friends[i].partnerName == "waiting…" || from.isEmpty {
+          friends[i].partnerName = newName
+          friends[i].lastActivity = "renamed to \(newName)"
+          saveFriends()
+          onFriendsChanged?()
+          onPresence?()
+        }
+      } else if !from.isEmpty, let i = friends.firstIndex(where: { $0.partnerName == from }) {
+        friends[i].partnerName = newName
+        friends[i].lastActivity = "renamed to \(newName)"
+        saveFriends()
+        onFriendsChanged?()
+        onPresence?()
+      }
     case "sync":
       let code = (json["code"] as? String) ?? activeCode
       let f = Self.num(json, "fullness") ?? 0
@@ -555,11 +664,22 @@ struct FriendBond: Codable, Equatable {
       do {
         let res = try await postJSON(path: "/api/invite", body: [
           "name": displayName,
+          "deviceId": deviceId,
           "code": code,
           "fullness": friends[i].fullness,
           "happiness": friends[i].happiness,
         ])
         let restored = (res["code"] as? String) ?? code
+        if let guest = res["guestName"] as? String, !guest.isEmpty {
+          friends[i].partnerName = guest
+          friends[i].waiting = false
+          friends[i].lastActivity = "bond restored"
+          saveFriends()
+          onFriendsChanged?()
+          attach(code: restored)
+          onStatus?("bonded with \(guest)")
+          return
+        }
         friends[i].lastActivity = "invite restored — send \(restored) again"
         saveFriends()
         onFriendsChanged?()
@@ -577,6 +697,7 @@ struct FriendBond: Codable, Equatable {
     do {
       _ = try await postJSON(path: "/api/restore", body: [
         "name": displayName,
+        "deviceId": deviceId,
         "code": code,
         "partnerName": friends[i].partnerName,
         "fullness": friends[i].fullness,

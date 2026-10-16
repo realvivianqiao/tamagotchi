@@ -19,7 +19,8 @@ let palette: [Px: UInt32] = [
   .outline: 0x4A2C12, .gold: 0xE8A84C, .light: 0xF8D99C, .dark: 0xC07C2E,
   .black: 0x1E1612, .white: 0xFFFFFF, .pink: 0xFF8FA3, .red: 0xD9434E, .tag: 0xFFD84A,
   .orange: 0xF08A3A, .cream: 0xFFF3D6, .gray: 0x6E6E6E,
-  .purple: 0xC86BB0, .yellow: 0xFFD45A,
+  // soft lavender octopus (matches the blub-blub look)
+  .purple: 0xC9AEE3, .yellow: 0xFFD45A,
 ]
 
 enum Species: String, CaseIterable, Codable, Hashable {
@@ -226,27 +227,36 @@ enum Dog {
     }
   }
 
-  // MARK: Octopus — chubby pixel blob + stubby legs (same language as the dog)
+  // MARK: Octopus — stubby lavender blob (front-facing, blub-blub look)
 
   private static func drawOctopus(_ c: inout Canvas, _ look: Look) -> (Int, Int) {
     let bob = look.wag > 0 ? 1 : 0
-    let headY = 10.0 - Double(bob)
-    // four clear stubby tentacles (not a soft jelly fringe)
-    let feet: [(Double, Double)] = [(10, 24), (15, 25.5), (21, 25.5), (26, 24)]
-    for (i, t) in feet.enumerated() {
-      let wave = (look.wag > 0 ? 1.0 : 0) * (i % 2 == 0 ? 1 : -1)
-      c.ellipse(t.0 + wave, 19.5, 1.8, 3.2, .purple)
-      c.ellipse(t.0 + wave, t.1, 2.2, 2.0, .purple)
-      c[Int(t.0 + wave), Int(t.1) + 1] = .pink // sucker
+    let (bodyY, footY): (Double, Double) = {
+      switch look.pose {
+      case .lie: return (17.5, 23.5)
+      case .hang: return (11.0, 22.0)
+      default: return (11.0 - Double(bob), 23.5)
+      }
+    }()
+
+    // five short flat tentacles (sitting on the ground)
+    let feetX = [9.5, 13.5, 17.5, 21.5, 25.5]
+    for (i, fx) in feetX.enumerated() {
+      let wave = (look.wag > 0 ? 0.8 : 0) * (i % 2 == 0 ? 1 : -1)
+      c.ellipse(fx + wave, footY - 1.2, 1.9, 2.2, .purple)
+      c.ellipse(fx + wave, footY + 0.4, 2.1, 1.5, .purple)
     }
-    // round head + lighter belly
-    c.ellipse(18, headY, 9.2, 7.5, .purple)
-    c.ellipse(18, headY + 2.2, 6.2, 4.2, .pink)
-    // tiny collar
-    c.rect(15, Int(headY) + 6, 21, Int(headY) + 7, .red)
-    c[18, Int(headY) + 8] = .tag
-    if look.tongue { c.rect(20, Int(headY) + 3, 21, Int(headY) + 5, .pink) }
-    return (-4, Int(headY) - 8)
+
+    // big round head
+    c.ellipse(17.5, bodyY, 9.8, 8.6, .purple)
+    // soft highlight on top (same family as the body — no sticker look)
+    c.ellipse(14.8, bodyY - 3.5, 3.0, 1.8, .pink)
+
+    if look.tongue {
+      c.rect(18, Int(bodyY) + 3, 19, Int(bodyY) + 5, .pink)
+    }
+    // head offset so drawEyes lands on the face center
+    return (0, Int(bodyY) - 8)
   }
 
   // MARK: Bird — tiny chick, same crisp silhouette language
@@ -291,11 +301,11 @@ enum Dog {
     return head
   }
 
-  /// Exact original face for the dog; matching language for the others.
+  /// Exact original face for the dog; front-facing blob face for the octopus.
   private static func drawEyes(_ c: inout Canvas, at o: (x: Int, y: Int), eyes: Eyes, species: Species) {
     let (x, y): (Int, Int) = {
       switch species {
-      case .octopus: return (20 + o.x, 7 + o.y)
+      case .octopus: return (20 + o.x, 8 + o.y) // right eye; left is x-6
       case .bird: return (23 + o.x, 6 + o.y)
       case .dog: return (26 + o.x, 8 + o.y)
       }
@@ -304,8 +314,13 @@ enum Dog {
     func face(_ ex: Int, _ ey: Int) {
       switch eyes {
       case .open:
-        c.rect(ex, ey, ex + 1, ey + 1, .black)
-        c[ex + 1, ey] = .white
+        // octopus: plain square dots (no sparkle) like the reference
+        if species == .octopus {
+          c.rect(ex, ey, ex, ey, .black)
+        } else {
+          c.rect(ex, ey, ex + 1, ey + 1, .black)
+          c[ex + 1, ey] = .white
+        }
       case .closed:
         c.rect(ex - 1, ey + 1, ex + 1, ey + 1, .outline)
       case .happy:
@@ -322,10 +337,23 @@ enum Dog {
       }
     }
 
-    face(x, y)
-    if species == .octopus { face(x - 7, y) }
-    c[x, y + 3] = eyes == .angry ? .red : .pink
-    if species == .octopus { c[x - 7, y + 3] = .pink }
+    if species == .octopus {
+      face(x, y)
+      face(x - 6, y)
+      // tiny v mouth
+      if eyes != .angry {
+        c[x - 3, y + 3] = .black
+        c[x - 4, y + 2] = .black
+        c[x - 2, y + 2] = .black
+      }
+      // blush freckles under each eye
+      let blush: Px = eyes == .angry ? .red : .pink
+      c[x - 7, y + 3] = blush
+      c[x + 1, y + 3] = blush
+    } else {
+      face(x, y)
+      c[x, y + 3] = eyes == .angry ? .red : .pink
+    }
   }
 }
 

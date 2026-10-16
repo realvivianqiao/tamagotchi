@@ -144,6 +144,11 @@ import AppKit
     Online.shared.onStatus = { [weak self] text in
       self?.onlineNote = text
     }
+    Online.shared.onBondAlert = { [weak self] message, ok in
+      guard let self else { return }
+      self.say(ok ? message.components(separatedBy: "\n").first ?? message : "uh oh…", seconds: 3.5)
+      self.alert(message)
+    }
     Online.shared.onFriendsChanged = { [weak self] in
       self?.refreshStatusItem()
       self?.syncVisitorFromFriends()

@@ -155,6 +155,8 @@ struct FriendBond: Codable, Equatable {
   var onStatus: ((String) -> Void)?
   var onPresence: (() -> Void)?
   var onFriendsChanged: (() -> Void)?
+  /// Claim/share result that should pop an alert + speech (not just the menu note).
+  var onBondAlert: ((String, Bool) -> Void)?
 
   private var session: URLSession!
   private var task: URLSessionWebSocketTask?
@@ -205,11 +207,16 @@ struct FriendBond: Codable, Equatable {
         shareCode = c
         ensureSocket()
         send(["type": "hello", "deviceId": deviceId, "name": displayName])
+        if let pending = res["pendingBonds"] as? [[String: Any]] {
+          for row in pending { applyBondMessage(row) }
+        }
+        await pullPendingBonds()
         onStatus?("your code · \(c)")
         onFriendsChanged?()
         completion?(c)
       } catch {
         onStatus?("share failed: \(error.localizedDescription)")
+        onBondAlert?("Couldn’t get your share code.\n\(error.localizedDescription)", false)
         completion?(nil)
       }
     }
@@ -222,10 +229,16 @@ struct FriendBond: Codable, Equatable {
 
   func join(code raw: String) {
     let token = Self.extractCode(raw)
-    // Already on this pad — bonding is once; just focus that friend.
+    guard token.count == 6 else {
+      onStatus?("bad code")
+      onBondAlert?("That doesn’t look like a 6-character CoPet code.", false)
+      return
+    }
+    // Already bonded to this share hub or pair — focus them.
     if let existing = friends.first(where: { $0.code == token && !$0.waiting }) {
       setActive(code: existing.code)
       onStatus?("already bonded with \(existing.partnerName)")
+      onBondAlert?("You’re already bonded with \(existing.partnerName).", true)
       ensureSocket()
       attach(code: existing.code)
       return
@@ -238,29 +251,89 @@ struct FriendBond: Codable, Equatable {
           "deviceId": deviceId,
           "code": token,
           "species": mySpecies.rawValue,
+          "fullness": lastFullness,
+          "happiness": lastHappiness,
         ])
         if let err = res["error"] as? String {
           onStatus?(err)
+          let nice: String =
+            switch err {
+            case "room not found":
+              "Code \(token) wasn’t found.\nAsk your friend to open CoPet → Bonds → Share my code (so the server knows it), then try again."
+            case "that's your own invite":
+              "That’s your own code — send it to a friend instead."
+            case "already bonded":
+              "That code is already bonded to someone else."
+            default:
+              err
+            }
+          onBondAlert?(nice, false)
           return
         }
         let host = (res["hostName"] as? String) ?? "friend"
         let f = Self.num(res, "fullness") ?? 80
         let h = Self.num(res, "happiness") ?? 80
+        let pair = (res["code"] as? String) ?? token
+        let sp = (res["species"] as? String) ?? Species.dog.rawValue
         upsert(FriendBond(
-          code: (res["code"] as? String) ?? token,
+          code: pair,
           partnerName: host, online: false, waiting: false,
           fullness: f, happiness: h,
-          lastActivity: (res["alreadyBonded"] as? Bool == true) ? "reconnected" : "just bonded"))
-        activeCode = (res["code"] as? String) ?? token
+          lastActivity: (res["alreadyBonded"] as? Bool == true) ? "reconnected" : "just bonded",
+          species: sp))
+        activeCode = pair
         saveFriends()
         onStatus?("bonded with \(host)")
         onFriendsChanged?()
         onPresence?()
         ensureSocket()
-        attach(code: activeCode!)
+        attach(code: pair)
+        cloudPush(fullness: lastFullness, happiness: lastHappiness)
+        let again = res["alreadyBonded"] as? Bool == true
+        onBondAlert?(
+          again
+            ? "Reconnected with \(host)!"
+            : "Bonded with \(host)! 🎉\nThey’re in your Friends list — pet/feed them from there.",
+          true)
+        track("claim_ok", code: pair, targetName: host, payload: ["shareCode": token])
       } catch {
         onStatus?("claim failed: \(error.localizedDescription)")
+        onBondAlert?("Claim failed.\n\(error.localizedDescription)", false)
+        track("claim_fail", code: token, payload: ["error": error.localizedDescription])
       }
+    }
+  }
+
+  /// Apply a server `bond` payload (live WS or queued pendingBonds).
+  func applyBondMessage(_ json: [String: Any]) {
+    guard let code = json["code"] as? String, !code.isEmpty else { return }
+    let partner = (json["partnerName"] as? String) ?? "friend"
+    let f = Self.num(json, "fullness") ?? 80
+    let h = Self.num(json, "happiness") ?? 80
+    let sp = (json["species"] as? String) ?? Species.dog.rawValue
+    let isNew = !friends.contains(where: { $0.code == code })
+    upsert(FriendBond(
+      code: code, partnerName: partner, online: false, waiting: false,
+      fullness: f, happiness: h, lastActivity: "just bonded", species: sp))
+    if activeCode == nil { activeCode = code }
+    saveFriends()
+    onStatus?("bonded with \(partner)")
+    onFriendsChanged?()
+    onPresence?()
+    attach(code: code)
+    if isNew {
+      onBondAlert?("\(partner) bonded with you! 🎉\nThey’re in your Friends list now.", true)
+    }
+  }
+
+  func pullPendingBonds() async {
+    do {
+      let res = try await getJSON(path: "/api/pending-bonds?deviceId=\(deviceId)")
+      if let pending = res["pendingBonds"] as? [[String: Any]] {
+        for row in pending { applyBondMessage(row) }
+      }
+    } catch {
+      // ok if older server
     }
   }
 
@@ -386,6 +459,8 @@ struct FriendBond: Codable, Equatable {
       cloudPush(fullness: nil, happiness: nil)
       ensureSocket()
       send(["type": "hello", "deviceId": deviceId, "name": displayName])
+      // Claims that happened while offline (host notification queue).
+      await pullPendingBonds()
       // Keep your standing share-code alive across Render sleeps.
       if shareCode != nil || !friends.isEmpty {
         shareMyCode(fullness: 80, happiness: 80)
@@ -657,20 +732,7 @@ struct FriendBond: Codable, Equatable {
       applyPresence(json)
     case "bond":
       // Someone claimed your standing share-code — add them as a friend.
-      guard let code = json["code"] as? String, !code.isEmpty else { break }
-      let partner = (json["partnerName"] as? String) ?? "friend"
-      let f = Self.num(json, "fullness") ?? 80
-      let h = Self.num(json, "happiness") ?? 80
-      let sp = (json["species"] as? String) ?? Species.dog.rawValue
-      upsert(FriendBond(
-        code: code, partnerName: partner, online: false, waiting: false,
-        fullness: f, happiness: h, lastActivity: "just bonded", species: sp))
-      if activeCode == nil { activeCode = code }
-      saveFriends()
-      onStatus?("bonded with \(partner)")
-      onFriendsChanged?()
-      onPresence?()
-      attach(code: code)
+      applyBondMessage(json)
 
     case "rename":
       // Partner changed their pet name — update local friend row + cloud.

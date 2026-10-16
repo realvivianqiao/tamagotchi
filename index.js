@@ -236,11 +236,59 @@ function roomPayload(room, self) {
   }; // `code` lets multi-friend clients update the right person
 }
 
+/** Push to all live sockets for this pad. Returns how many clients got the message. */
 function notifyDevice(deviceId, msg) {
-  if (!deviceId || !wss) return;
+  if (!deviceId || !wss) return 0;
+  let n = 0;
   for (const client of wss.clients) {
-    if (client.readyState === 1 && client.deviceId === deviceId) send(client, msg);
+    if (client.readyState === 1 && client.deviceId === deviceId) {
+      send(client, msg);
+      n += 1;
+    }
   }
+  return n;
+}
+
+/** Queue a bond notice on the host's personal hub when they're offline. */
+function queueBondForHost(shareCode, bondMsg) {
+  const inv = invites.get(shareCode);
+  if (!inv?.personalHub) return;
+  if (!Array.isArray(inv.pendingBonds)) inv.pendingBonds = [];
+  // Dedupe by pair code.
+  inv.pendingBonds = inv.pendingBonds.filter((b) => b.code !== bondMsg.code);
+  inv.pendingBonds.push({
+    type: "bond",
+    code: bondMsg.code,
+    partnerName: bondMsg.partnerName,
+    species: bondMsg.species || "dog",
+    fullness: bondMsg.fullness ?? 80,
+    happiness: bondMsg.happiness ?? 80,
+    shareCode,
+    queuedAt: Date.now(),
+  });
+  // Cap queue so a wiped /tmp file doesn't grow forever.
+  if (inv.pendingBonds.length > 40) inv.pendingBonds = inv.pendingBonds.slice(-40);
+  saveInvites();
+}
+
+/** Deliver any queued "someone claimed your code" notices to this device. */
+function flushPendingBonds(deviceId, ws) {
+  if (!deviceId) return [];
+  const delivered = [];
+  for (const [shareCode, inv] of invites) {
+    if (!inv?.personalHub || inv.hostDeviceId !== deviceId) continue;
+    const pending = Array.isArray(inv.pendingBonds) ? inv.pendingBonds : [];
+    if (!pending.length) continue;
+    for (const b of pending) {
+      const msg = { ...b, type: "bond" };
+      if (ws && ws.readyState === 1) send(ws, msg);
+      else notifyDevice(deviceId, msg);
+      delivered.push(msg);
+    }
+    inv.pendingBonds = [];
+  }
+  if (delivered.length) saveInvites();
+  return delivered;
 }
 
 function send(ws, msg) {
@@ -420,14 +468,16 @@ const httpServer = createServer(async (req, res) => {
         existing.inv.bondedAt = null;
         ensureRoom(existing.code, { createIfMissing: true });
         await saveInvites();
+        const pending = flushPendingBonds(deviceId, null);
         track({
           deviceId, displayName: name, event: "invite_hub_reuse", code: existing.code,
-          friendCount: null, payload: { personal: true },
+          friendCount: null, payload: { personal: true, pendingBonds: pending.length },
         });
         return json(res, 200, {
           code: existing.code,
           personal: true,
           hostName: name,
+          pendingBonds: pending,
         });
       }
       const c = usable ? wanted : uniqueCode();
@@ -611,7 +661,7 @@ const httpServer = createServer(async (req, res) => {
         species,
       };
       await appendFriendToPlayer(inv.hostDeviceId, hostFriend);
-      notifyDevice(inv.hostDeviceId, {
+      const bondMsg = {
         type: "bond",
         code: pair,
         partnerName: name,
@@ -619,11 +669,14 @@ const httpServer = createServer(async (req, res) => {
         fullness: pairInv.fullness,
         happiness: pairInv.happiness,
         shareCode: c,
-      });
+      };
+      const reached = notifyDevice(inv.hostDeviceId, bondMsg);
+      // Host offline / not connected → queue until they open CoPet again.
+      if (reached === 0) queueBondForHost(c, bondMsg);
       track({
         deviceId, displayName: name, event: "claim_bond", code: pair,
         targetName: inv.hostName, species,
-        payload: { shareCode: c, personalHub: true },
+        payload: { shareCode: c, personalHub: true, hostNotified: reached > 0 },
       });
       return json(res, 200, {
         code: pair,
@@ -632,6 +685,7 @@ const httpServer = createServer(async (req, res) => {
         fullness: pairInv.fullness,
         happiness: pairInv.happiness,
         shareCode: c,
+        hostNotified: reached > 0,
       });
     }
 
@@ -677,6 +731,22 @@ const httpServer = createServer(async (req, res) => {
       store: supabaseEnabled ? "supabase" : STORE,
       supabase: supabaseEnabled,
     });
+  }
+
+  // Host pulls any bond notices queued while offline (Supabase may be off).
+  if (req.method === "GET" && url === "/api/pending-bonds") {
+    const q = new URL(req.url || "/", "http://x").searchParams;
+    const deviceId = String(q.get("deviceId") || "").slice(0, 64);
+    if (!deviceId) return json(res, 400, { error: "deviceId required" });
+    const pending = [];
+    for (const [shareCode, inv] of invites) {
+      if (!inv?.personalHub || inv.hostDeviceId !== deviceId) continue;
+      const list = Array.isArray(inv.pendingBonds) ? inv.pendingBonds : [];
+      for (const b of list) pending.push({ ...b, shareCode, type: "bond" });
+      inv.pendingBonds = [];
+    }
+    if (pending.length) await saveInvites();
+    return json(res, 200, { pendingBonds: pending });
   }
 
   // Client analytics (menu clicks, local gestures). Owner + metrics + timestamps required.
@@ -871,7 +941,10 @@ wss.on("connection", (ws) => {
         event: "ws_hello",
         payload: { name: msg.name || null },
       });
-      return send(ws, { type: "hello_ok", deviceId: ws.deviceId });
+      send(ws, { type: "hello_ok", deviceId: ws.deviceId });
+      // Deliver any claims that happened while this pad was offline.
+      flushPendingBonds(ws.deviceId, ws);
+      return;
     }
 
     // Attach to a friend room (one socket can be in many rooms).

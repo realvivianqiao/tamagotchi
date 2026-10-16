@@ -1,6 +1,6 @@
 {
-  "version": "0.5.6",
+  "version": "0.5.7",
   "url": "/CoPet.zip",
-  "notes": "Full event logging to Supabase (owner, metrics, timestamps).",
-  "publishedAt": "2026-10-16T02:47:54Z"
+  "notes": "Fix bond accept: clear success/error alerts; queue host notify if offline.",
+  "publishedAt": "2026-10-16T02:53:20Z"
 }

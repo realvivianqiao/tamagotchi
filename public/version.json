@@ -1,6 +1,6 @@
 {
-  "version": "0.4.1",
+  "version": "0.4.2",
   "url": "/CoPet.zip",
-  "notes": "Good morning from system time, plus optional local weather (no API key).",
-  "publishedAt": "2026-10-16T01:48:51Z"
+  "notes": "Default names: Zuzu (dog), Bloop (octopus), Puff (bird).",
+  "publishedAt": "2026-10-16T01:49:47Z"
 }

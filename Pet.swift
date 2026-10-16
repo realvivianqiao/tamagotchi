@@ -73,7 +73,7 @@ import AppKit
     menu.delegate = self
     wireOnline()
 
-    // First download / fresh install: pick Buddy, Ink, or Pip.
+    // First download / fresh install: pick Zuzu, Bloop, or Puff.
     if !PetPicker.hasChosen {
       let pick = PetPicker.runModal()
       species = pick

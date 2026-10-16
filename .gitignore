@@ -1,6 +1,8 @@
 server/node_modules/
+node_modules/
 build/
 .DS_Store
 *.log
 .env
+.env.*
 tamagotchi/

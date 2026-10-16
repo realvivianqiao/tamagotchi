@@ -72,17 +72,34 @@ struct FriendBond: Codable, Equatable {
     return URL(string: s) ?? httpBase
   }
 
+  /// Stable id for this Mac — used as the Supabase player primary key.
+  var deviceId: String {
+    let key = "mochiDeviceId"
+    if let existing = UserDefaults.standard.string(forKey: key), !existing.isEmpty {
+      return existing
+    }
+    let id = UUID().uuidString
+    UserDefaults.standard.set(id, forKey: key)
+    return id
+  }
+
   var displayName: String {
     get {
       let n = UserDefaults.standard.string(forKey: "mochiName")?.trimmingCharacters(in: .whitespacesAndNewlines)
       return (n?.isEmpty == false) ? n! : NSFullUserName().split(separator: " ").first.map(String.init) ?? "me"
     }
-    set { UserDefaults.standard.set(newValue, forKey: "mochiName") }
+    set {
+      UserDefaults.standard.set(newValue, forKey: "mochiName")
+      cloudPush(fullness: nil, happiness: nil)
+    }
   }
 
   var mySpecies: Species {
     get { Species.parse(UserDefaults.standard.string(forKey: "mochiSpecies")) }
-    set { UserDefaults.standard.set(newValue.rawValue, forKey: "mochiSpecies") }
+    set {
+      UserDefaults.standard.set(newValue.rawValue, forKey: "mochiSpecies")
+      cloudPush(fullness: nil, happiness: nil)
+    }
   }
 
   private(set) var friends: [FriendBond] = []
@@ -232,12 +249,16 @@ struct FriendBond: Codable, Equatable {
 
   func restoreBondIfAny() {
     loadFriends()
-    guard !friends.isEmpty else { return }
-    if activeCode == nil { activeCode = friends.first?.code }
-    onFriendsChanged?()
-    onPresence?()
-    ensureSocket()
-    for f in friends { attach(code: f.code) }
+    Task { @MainActor in
+      await cloudPull()
+      guard !friends.isEmpty else { return }
+      if activeCode == nil { activeCode = friends.first?.code }
+      onFriendsChanged?()
+      onPresence?()
+      ensureSocket()
+      for f in friends { attach(code: f.code) }
+      cloudPush(fullness: nil, happiness: nil)
+    }
   }
 
   static func extractCode(_ raw: String) -> String {
@@ -270,6 +291,7 @@ struct FriendBond: Codable, Equatable {
       d.set(data, forKey: "mochiFriends")
     }
     d.set(activeCode, forKey: "mochiActiveCode")
+    cloudPush(fullness: nil, happiness: nil)
   }
 
   private func loadFriends() {
@@ -294,6 +316,83 @@ struct FriendBond: Codable, Equatable {
     activeCode = d.string(forKey: "mochiActiveCode") ?? friends.first?.code
   }
 
+  /// Push name / species / friends to Supabase via the Render API.
+  func cloudPush(fullness: Double?, happiness: Double?) {
+    let payloadFriends: [[String: Any]] = friends.map { f in
+      var row: [String: Any] = [
+        "code": f.code,
+        "partnerName": f.partnerName,
+        "waiting": f.waiting,
+        "fullness": f.fullness,
+        "happiness": f.happiness,
+        "species": f.species,
+      ]
+      if let act = f.lastActivity { row["lastActivity"] = act }
+      return row
+    }
+    var body: [String: Any] = [
+      "deviceId": deviceId,
+      "displayName": displayName,
+      "species": mySpecies.rawValue,
+      "friends": payloadFriends,
+    ]
+    if let activeCode { body["activeCode"] = activeCode }
+    if let fullness { body["fullness"] = fullness }
+    if let happiness { body["happiness"] = happiness }
+    Task { @MainActor in
+      do {
+        _ = try await postJSON(path: "/api/me", body: body)
+      } catch {
+        // Cloud optional until Supabase env is set on Render.
+      }
+    }
+  }
+
+  /// Pull profile + friends from Supabase (fills empty local state; merges missing codes).
+  func cloudPull() async {
+    do {
+      let res = try await getJSON(path: "/api/me?deviceId=\(deviceId)")
+      if let name = res["displayName"] as? String, !name.isEmpty {
+        UserDefaults.standard.set(name, forKey: "mochiName")
+      }
+      if let sp = res["species"] as? String, !sp.isEmpty {
+        UserDefaults.standard.set(sp, forKey: "mochiSpecies")
+      }
+      if let code = res["activeCode"] as? String, !code.isEmpty {
+        activeCode = code
+      }
+      guard let raw = res["friends"] as? [[String: Any]] else { return }
+      let cloud: [FriendBond] = raw.compactMap { row in
+        guard let code = row["code"] as? String, !code.isEmpty else { return nil }
+        return FriendBond(
+          code: code,
+          partnerName: (row["partnerName"] as? String) ?? "friend",
+          online: false,
+          waiting: (row["waiting"] as? Bool) ?? false,
+          fullness: (row["fullness"] as? Double) ?? 80,
+          happiness: (row["happiness"] as? Double) ?? 80,
+          lastActivity: row["lastActivity"] as? String,
+          species: (row["species"] as? String) ?? Species.dog.rawValue)
+      }
+      if friends.isEmpty {
+        friends = cloud
+      } else {
+        for c in cloud where !friends.contains(where: { $0.code == c.code }) {
+          friends.append(c)
+        }
+      }
+      // Persist locally without re-triggering an immediate cloudPush loop
+      let d = UserDefaults.standard
+      if let data = try? JSONEncoder().encode(friends) {
+        d.set(data, forKey: "mochiFriends")
+      }
+      d.set(activeCode, forKey: "mochiActiveCode")
+      onFriendsChanged?()
+    } catch {
+      // ok if cloud not configured yet
+    }
+  }
+
   // MARK: - HTTP / WS
 
   private func postJSON(path: String, body: [String: Any]) async throws -> [String: Any] {
@@ -310,6 +409,22 @@ struct FriendBond: Codable, Equatable {
     let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
     if status >= 400 {
       if json["error"] != nil { return json }
+      throw NSError(domain: "Mochi", code: status, userInfo: [NSLocalizedDescriptionKey: (json["error"] as? String) ?? "HTTP \(status)"])
+    }
+    return json
+  }
+
+  private func getJSON(path: String) async throws -> [String: Any] {
+    guard let url = URL(string: path, relativeTo: httpRoot)?.absoluteURL else {
+      throw NSError(domain: "Mochi", code: 1, userInfo: [NSLocalizedDescriptionKey: "bad url"])
+    }
+    var req = URLRequest(url: url)
+    req.httpMethod = "GET"
+    req.timeoutInterval = 60
+    let (data, resp) = try await URLSession.shared.data(for: req)
+    let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+    let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+    if status >= 400 {
       throw NSError(domain: "Mochi", code: status, userInfo: [NSLocalizedDescriptionKey: (json["error"] as? String) ?? "HTTP \(status)"])
     }
     return json

@@ -28,8 +28,11 @@ import AppKit
 
   private var fullness: Double
   private var happiness: Double
-  /// Always your local pet label (Mochi) — never a friend's displayName.
-  private var petName: String { defaultPetName }
+  /// Your chosen name (My name…) — never overwritten by friend presence/sync.
+  private var petName: String {
+    let n = Online.shared.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+    return n.isEmpty ? defaultPetName : n
+  }
   private var applyingRemote = false
   private var onlineNote: String?
   private var hidden = false
@@ -77,6 +80,16 @@ import AppKit
     }
 
     window.orderFrontRegardless()
+    restoreNapIfNeeded()
+
+    NotificationCenter.default.addObserver(
+      forName: NSApplication.didChangeScreenParametersNotification,
+      object: nil, queue: .main
+    ) { [weak self] _ in
+      guard let self, self.untilWoken else { return }
+      self.y = self.sleepFloor(in: self.screenFrame())
+      self.render()
+    }
 
     let timer = Timer(timeInterval: 1 / fps, target: self, selector: #selector(step), userInfo: nil, repeats: true)
     RunLoop.main.add(timer, forMode: .common)
@@ -138,6 +151,22 @@ import AppKit
   }
 
   private func playRemote(_ action: String) {
+    // Sticky nap is locked — friends can still nudge stats / leave a note, but
+    // they cannot change activity except an explicit poke (wake + mad).
+    if untilWoken, action != "poke" {
+      switch action {
+      case "feed":
+        fullness = min(100, fullness + 35)
+        happiness = min(100, happiness + 4)
+      case "play", "pet":
+        happiness = min(100, happiness + 4)
+      case "nap":
+        break
+      default:
+        break
+      }
+      return
+    }
     switch action {
     case "feed":
       fullness = min(100, fullness + 35)
@@ -153,8 +182,7 @@ import AppKit
       emit("❤️", count: 3)
       if activity != .sleep && !untilWoken { hop() }
     case "nap":
-      untilWoken = true
-      set(.sleep, seconds: 9_999)
+      enterNap(sayLine: false)
     case "poke":
       getAngry(fromPoke: true)
     default:
@@ -162,9 +190,18 @@ import AppKit
     }
   }
 
+  private var lastCloudPush: TimeInterval = 0
+
   private func pushOnline(action: String? = nil) {
-    guard !applyingRemote, Online.shared.isBonded else { return }
-    Online.shared.sync(fullness: fullness, happiness: happiness, action: action)
+    guard !applyingRemote else { return }
+    if Online.shared.isBonded {
+      Online.shared.sync(fullness: fullness, happiness: happiness, action: action)
+    }
+    let now = ProcessInfo.processInfo.systemUptime
+    if now - lastCloudPush > 30 {
+      lastCloudPush = now
+      Online.shared.cloudPush(fullness: fullness, happiness: happiness)
+    }
   }
 
   // MARK: Loop
@@ -173,6 +210,20 @@ import AppKit
     tick += 1
     decay()
     guard !hidden else { return }
+
+    // Sticky nap: freeze activity forever until Wake up (survives screen / space switches).
+    if untilWoken {
+      activity = .sleep
+      vx = 0
+      vy = 0
+      targetX = nil
+      y = sleepFloor(in: screenFrame())
+      pinStaticSleepZzz()
+      updateParticles()
+      render()
+      return
+    }
+
     move(in: screenFrame())
     animate()
     updateParticles()
@@ -310,20 +361,18 @@ import AppKit
       bubbleTicks -= 1
       if bubbleTicks == 0 { bubble = nil }
     }
-    if activity == .sleep && tick % 45 == 0 {
-      emit(species == .bird ? "💤" : species == .octopus ? "🫧" : "💤")
+    if activity == .sleep {
+      pinStaticSleepZzz()
+    } else {
+      particles.removeAll { ($0.text == "💤" || $0.text == "🫧") && $0.vel == .zero }
     }
     if activity == .fly && tick % 32 == 0 { emit(["🪶", "✨"].randomElement()!) }
     if activity == .run && species == .dog && tick % 35 == 0 { emit("💨") }
 
-    if activity == .sleep && untilWoken {
-      activityTicks = max(activityTicks, Int(60 * fps)) // keep ticking forever while napping
-      return
-    }
     activityTicks -= 1
     guard activityTicks <= 0, activity != .held, activity != .fall else { return }
+    // Only non-sticky (idle) sleeps can auto-wake.
     if activity == .sleep {
-      untilWoken = false
       set(.sit, seconds: 2)
       say("🥱")
     } else {
@@ -376,18 +425,20 @@ import AppKit
   }
 
   private func set(_ next: Activity, seconds: Double) {
+    // Never clear sticky nap except via wakeStickyNap() / poke.
+    if next != .sleep, untilWoken { return }
     if next != .sleep { untilWoken = false }
     activity = next
     activityTicks = Int(seconds * fps)
   }
 
   private func startFall(vx: CGFloat, vy: CGFloat) {
-    // Accidental micro-falls must not end a nap.
-    if untilWoken, abs(vx) < 1, abs(vy) < 1 {
-      y = screenFrame().minY
+    // Sticky nap ignores throws / screen-jump physics entirely.
+    if untilWoken {
       self.vx = 0
       self.vy = 0
       activity = .sleep
+      y = sleepFloor(in: screenFrame())
       return
     }
     self.vx = vx
@@ -546,8 +597,26 @@ import AppKit
     }
   }
 
+  /// One still 💤 / 🫧 above the sleeper — no float animation.
+  private func pinStaticSleepZzz() {
+    let mark = species == .octopus ? "🫧" : "💤"
+    let pos = CGPoint(x: headPoint.x - 4, y: headPoint.y + 14)
+    if let i = particles.firstIndex(where: { $0.text == mark && $0.vel == .zero }) {
+      particles[i].pos = pos
+      particles[i].life = particles[i].maxLife
+    } else {
+      particles.removeAll { $0.text == "💤" || $0.text == "🫧" }
+      particles.append(Particle(text: mark, pos: pos, vel: .zero, life: 9999, maxLife: 9999))
+    }
+  }
+
   private func updateParticles() {
     for i in particles.indices {
+      // Static sleep zzz stays put
+      if particles[i].vel == .zero {
+        particles[i].life = particles[i].maxLife
+        continue
+      }
       particles[i].pos.x += particles[i].vel.dx
       particles[i].pos.y += particles[i].vel.dy
       particles[i].life -= 1
@@ -598,10 +667,58 @@ import AppKit
 
   func release() {
     guard dragged else { return pet() }
+    // Dropped at a screen edge → tuck in for a nap.
+    if edgeNapIfNeeded() { return }
     let stale = ProcessInfo.processInfo.systemUptime - lastDragTime > 0.1
     let v = stale ? .zero : throwVelocity
     if abs(v.dx) > 1 { dir = v.dx > 0 ? 1 : -1 }
     startFall(vx: max(-30, min(30, v.dx)), vy: max(-20, min(25, v.dy)))
+  }
+
+  /// Left / right / bottom of the visible screen → sticky nap (same as menu Nap).
+  @discardableResult
+  private func edgeNapIfNeeded() -> Bool {
+    let vf = screenFrame()
+    let edge: CGFloat = 56
+    let atLeft = x <= vf.minX + edge
+    let atRight = x >= vf.maxX - edge
+    let atBottom = y <= vf.minY + edge
+    guard atLeft || atRight || atBottom else { return false }
+
+    let margin = spriteSize.width / 2 - 8
+    if atLeft { x = vf.minX + margin; dir = 1 }
+    else if atRight { x = vf.maxX - margin; dir = -1 }
+    enterNap(sayLine: true)
+    return true
+  }
+
+  private func enterNap(sayLine: Bool) {
+    let vf = screenFrame()
+    untilWoken = true
+    targetX = nil
+    vx = 0
+    vy = 0
+    activity = .sleep
+    activityTicks = Int(9_999 * fps)
+    y = sleepFloor(in: vf)
+    if sayLine {
+      say(
+        species == .bird ? "roost 💤" :
+          species == .octopus ? "sand nap 🫧" : "zzz…")
+    }
+    persistNap()
+    pushOnline()
+    render()
+  }
+
+  private func wakeStickyNap() {
+    guard untilWoken || activity == .sleep else { return }
+    untilWoken = false
+    persistNap()
+    let vf = screenFrame()
+    y = restFloor(in: vf)
+    activity = .sit
+    activityTicks = Int(2 * fps)
   }
 
   // MARK: Actions
@@ -609,8 +726,8 @@ import AppKit
   private func pet() {
     happiness = min(100, happiness + 6)
     happyTicks = Int(2.5 * fps)
-    if activity == .sleep || untilWoken {
-      say("mmh…? 🥱")
+    if untilWoken || activity == .sleep {
+      say("mmh… 💤")
       pushOnline()
       return
     }
@@ -637,6 +754,12 @@ import AppKit
     let wasFull = fullness >= 95
     fullness = min(100, fullness + 35)
     happiness = min(100, happiness + (wasFull ? 2 : 4))
+    if untilWoken {
+      say(wasFull ? "nom… (still asleep)" : "nom nom… 💤")
+      emit("🍖")
+      pushOnline()
+      return
+    }
     set(.eat, seconds: 3.5)
     if wasFull {
       switch species {
@@ -657,6 +780,11 @@ import AppKit
   @objc private func play() {
     happiness = min(100, happiness + 12)
     fullness = max(0, fullness - 3)
+    if untilWoken {
+      say("…later. sleeping")
+      pushOnline()
+      return
+    }
     startSignatureMove(seconds: 7)
     pushOnline()
   }
@@ -683,7 +811,7 @@ import AppKit
 
   /// Mad reaction — personality intact.
   private func getAngry(fromPoke: Bool) {
-    if untilWoken || activity == .sleep { untilWoken = false }
+    if untilWoken || activity == .sleep { wakeStickyNap() }
     happyTicks = 0
     angryTicks = Int(5 * fps)
     happiness = max(0, happiness - (fromPoke ? 8 : 4))
@@ -707,23 +835,15 @@ import AppKit
   }
 
   @objc private func toggleNap() {
-    let vf = screenFrame()
-    if activity == .sleep {
-      untilWoken = false
-      y = restFloor(in: vf)
-      set(.sit, seconds: 2)
+    if untilWoken || activity == .sleep {
+      wakeStickyNap()
       say(
         species == .bird ? "morning chirp" :
           species == .octopus ? "rise…" : "🥱")
+      pushOnline()
     } else {
-      untilWoken = true
-      y = sleepFloor(in: vf)
-      set(.sleep, seconds: 9_999)
-      say(
-        species == .bird ? "roost 💤" :
-          species == .octopus ? "sand nap 🫧" : "zzz…")
+      enterNap(sayLine: true)
     }
-    pushOnline()
   }
 
   /// Send an action at a friend — their pet reacts on *their* screen (+ visitor preview here).
@@ -849,19 +969,9 @@ import AppKit
 
   @objc private func petFromMenu() { pet() }
 
-  @objc private func toggleHide() {
-    hidden.toggle()
-    if hidden {
-      window.orderOut(nil)
-      bubble = nil
-      particles.removeAll()
-    } else {
-      window.orderFrontRegardless()
-      set(.sit, seconds: 2)
-      say("i'm back 🐾")
-      render()
-    }
-    refreshStatusItem()
+  @objc private func pokeSelf() {
+    getAngry(fromPoke: true)
+    pushOnline()
   }
 
   @objc private func quit() {
@@ -932,11 +1042,12 @@ import AppKit
   @objc private func onlineSetName() {
     if let name = prompt(
       "Your name",
-      message: "Friends see this when they pet/feed you (e.g. “Vivian pet you”). Your menu/Quit stay \(defaultPetName).",
+      message: "This is your pet’s name in the menu, and what friends see when they pet/feed you.",
       placeholder: Online.shared.displayName),
        !name.isEmpty
     {
       Online.shared.displayName = name
+      refreshStatusItem()
     }
   }
 
@@ -987,7 +1098,8 @@ import AppKit
     // YOUR pet — Feed always targets you, never the friend you're watching.
     if !hidden {
       menu.addItem(info("—— \(petName) \(species.emoji) (you) ——"))
-      menu.addItem(item("🍖 Feed \(petName)", #selector(feed)))
+      menu.addItem(item("👉 Poke", #selector(pokeSelf)))
+      menu.addItem(item("🍖 Feed", #selector(feed)))
       menu.addItem(item("🎾 Play", #selector(play)))
       menu.addItem(item("✋ Pet", #selector(petFromMenu)))
       menu.addItem(item(activity == .sleep ? "☀️ Wake up" : "💤 Nap", #selector(toggleNap)))
@@ -1008,89 +1120,75 @@ import AppKit
       menu.addItem(.separator())
     }
 
-    // Friend on your screen / selected friend — poke & co. live here (not buried)
-    let focus = visitor.flatMap { v in Online.shared.friends.first { $0.code == v.code } }
-      ?? Online.shared.activeFriend
-    if let f = focus, !f.waiting {
-      let who = f.partnerName
-      let code = f.code
-      menu.addItem(info("—— \(who) \(f.petSpecies.emoji) (friend) ——"))
-      menu.addItem(friendActionItem("👉 Poke \(who)", #selector(friendPoke(_:)), code: code))
-      menu.addItem(friendActionItem("🍖 Feed \(who)", #selector(friendFeed(_:)), code: code))
-      menu.addItem(friendActionItem("🎾 Play with \(who)", #selector(friendPlay(_:)), code: code))
-      menu.addItem(friendActionItem("✋ Pet \(who)", #selector(friendPet(_:)), code: code))
-      menu.addItem(friendActionItem("💤 Tuck \(who) in", #selector(friendNap(_:)), code: code))
-      if visitor?.code == code {
-        menu.addItem(item("👋 Hide \(who) from screen", #selector(hideVisitor)))
-      } else {
-        menu.addItem(friendActionItem("✨ Show \(who) on screen", #selector(showFriendOnScreen(_:)), code: code))
-      }
-      menu.addItem(.separator())
-    } else if !friends.isEmpty {
-      menu.addItem(item("👉 Poke a friend…", #selector(pokeActiveFriend)))
-      menu.addItem(.separator())
-    }
-
-    menu.addItem(item(hidden ? "☀️ Show pet" : "😴 Hide pet (focus mode)", #selector(toggleHide)))
-    menu.addItem(.separator())
-
-    // Friends: status + actions aimed at *them*
+    // Friends ▸ each person is a nested menu (name once, short actions)
     let friendsItem = NSMenuItem(
       title: "Friends (\(friends.count))",
       action: nil,
       keyEquivalent: "")
     let sub = NSMenu()
     if friends.isEmpty {
-      sub.addItem(info("No friends yet"))
-      sub.addItem(info("Invite or Claim to bond"))
+      sub.addItem(info("No friends yet — Invite or Claim"))
     } else {
       for f in friends {
         let dot = f.waiting ? "⏳" : (f.online ? "🟢" : "⚪️")
-        let name = f.waiting ? "code \(f.code) · waiting" : f.partnerName
-        let row = NSMenuItem(
-          title: "\(dot) \(name)",
-          action: #selector(selectFriend(_:)),
-          keyEquivalent: "")
-        row.target = self
-        row.representedObject = f.code
+        let label = f.waiting ? "code \(f.code)" : shortFriendName(f.partnerName)
+        let row = NSMenuItem(title: "\(dot)  \(label)", action: nil, keyEquivalent: "")
         if f.code == Online.shared.activeCode { row.state = .on }
-        sub.addItem(row)
-        if f.waiting { continue }
-        sub.addItem(info("   \(f.petSpecies.emoji) \(f.petSpecies.title) · 🍖 \(Int(f.fullness))%  💛 \(Int(f.happiness))%"))
-        if let act = f.lastActivity {
-          sub.addItem(info("   \(act)"))
+        let person = NSMenu()
+
+        if f.waiting {
+          person.addItem(info("Waiting for them to join"))
+          person.addItem(info("Code \(f.code)"))
+        } else {
+          person.addItem(info("\(f.petSpecies.emoji) \(f.petSpecies.title)   🍖 \(Int(f.fullness))%   💛 \(Int(f.happiness))%"))
+          if let act = friendlyActivity(f.lastActivity) {
+            person.addItem(info(act))
+          }
+          person.addItem(.separator())
+
+          let focus = NSMenuItem(
+            title: "Select",
+            action: #selector(selectFriend(_:)),
+            keyEquivalent: "")
+          focus.target = self
+          focus.representedObject = f.code
+          if f.code == Online.shared.activeCode { focus.state = .on }
+          person.addItem(focus)
+
+          let onScreen = visitor?.code == f.code
+          let bring = NSMenuItem(
+            title: onScreen ? "Hide from screen" : "Show on screen",
+            action: onScreen ? #selector(hideFriendOnScreen(_:)) : #selector(showFriendOnScreen(_:)),
+            keyEquivalent: "")
+          bring.target = self
+          bring.representedObject = f.code
+          person.addItem(bring)
+
+          for (title, sel) in [
+            ("Feed", #selector(friendFeed(_:))),
+            ("Play", #selector(friendPlay(_:))),
+            ("Pet", #selector(friendPet(_:))),
+            ("Poke", #selector(friendPoke(_:))),
+            ("Tuck in", #selector(friendNap(_:))),
+          ] as [(String, Selector)] {
+            let m = NSMenuItem(title: title, action: sel, keyEquivalent: "")
+            m.target = self
+            m.representedObject = f.code
+            person.addItem(m)
+          }
         }
-        let onScreen = visitor?.code == f.code
-        let bring = NSMenuItem(
-          title: onScreen ? "   👋 Hide \(f.partnerName) from screen" : "   ✨ Show \(f.partnerName) on screen",
-          action: onScreen ? #selector(hideFriendOnScreen(_:)) : #selector(showFriendOnScreen(_:)),
-          keyEquivalent: "")
-        bring.target = self
-        bring.representedObject = f.code
-        sub.addItem(bring)
-        for (title, sel) in [
-          ("   🍖 Feed \(f.partnerName)", #selector(friendFeed(_:))),
-          ("   🎾 Play with \(f.partnerName)", #selector(friendPlay(_:))),
-          ("   ✋ Pet \(f.partnerName)", #selector(friendPet(_:))),
-          ("   👉 Poke \(f.partnerName)", #selector(friendPoke(_:))),
-          ("   💤 Tuck \(f.partnerName) in", #selector(friendNap(_:))),
-        ] as [(String, Selector)] {
-          let m = NSMenuItem(title: title, action: sel, keyEquivalent: "")
-          m.target = self
-          m.representedObject = f.code
-          sub.addItem(m)
-        }
-      }
-      sub.addItem(.separator())
-      for f in friends {
-        let name = f.waiting ? f.code : f.partnerName
+
+        person.addItem(.separator())
         let rm = NSMenuItem(
-          title: "Remove \(name)",
+          title: "Remove",
           action: #selector(removeFriend(_:)),
           keyEquivalent: "")
         rm.target = self
         rm.representedObject = f.code
-        sub.addItem(rm)
+        person.addItem(rm)
+
+        row.submenu = person
+        sub.addItem(row)
       }
     }
     friendsItem.submenu = sub
@@ -1103,7 +1201,7 @@ import AppKit
     }
     menu.addItem(item("My name…", #selector(onlineSetName)))
     menu.addItem(.separator())
-    menu.addItem(item("Quit \(defaultPetName)", #selector(quit)))
+    menu.addItem(item("Quit \(petName)", #selector(quit)))
   }
 
   private func item(_ title: String, _ action: Selector) -> NSMenuItem {
@@ -1118,6 +1216,24 @@ import AppKit
     return item
   }
 
+  private func shortFriendName(_ name: String, max: Int = 20) -> String {
+    guard name.count > max else { return name }
+    return String(name.prefix(max - 1)) + "…"
+  }
+
+  /// Skip noisy / technical last-activity lines in the menu.
+  private func friendlyActivity(_ raw: String?) -> String? {
+    guard let raw, !raw.isEmpty else { return nil }
+    let lower = raw.lowercased()
+    if lower.contains("server reset") || lower.contains("re-claim") || lower.contains("bond expired")
+      || lower.contains("invite dead") || lower.contains("retrying")
+    {
+      return nil
+    }
+    if raw.count > 36 { return String(raw.prefix(35)) + "…" }
+    return raw
+  }
+
   private func bar(_ value: Double) -> String {
     let n = Int((value / 10).rounded())
     return String(repeating: "▰", count: n) + String(repeating: "▱", count: 10 - n) + " \(Int(value))%"
@@ -1130,6 +1246,30 @@ import AppKit
     d.set(fullness, forKey: "fullness")
     d.set(happiness, forKey: "happiness")
     d.set(Date().timeIntervalSince1970, forKey: "savedAt")
+    persistNap()
+  }
+
+  private func persistNap() {
+    let d = UserDefaults.standard
+    d.set(untilWoken, forKey: "mochiStickyNap")
+    if untilWoken {
+      d.set(Double(x), forKey: "mochiNapX")
+      d.set(Double(y), forKey: "mochiNapY")
+    }
+  }
+
+  private func restoreNapIfNeeded() {
+    let d = UserDefaults.standard
+    guard d.bool(forKey: "mochiStickyNap") else { return }
+    untilWoken = true
+    activity = .sleep
+    activityTicks = Int(9_999 * fps)
+    if d.object(forKey: "mochiNapX") != nil {
+      x = CGFloat(d.double(forKey: "mochiNapX"))
+      y = CGFloat(d.double(forKey: "mochiNapY"))
+    }
+    y = sleepFloor(in: screenFrame())
+    render()
   }
 
   private static func loadStats() -> (Double, Double) {

@@ -12,9 +12,9 @@ A tiny Mac desktop pet. Download, invite someone, feed/pet/play — they see it 
 5. Bonded. Actions sync both ways.
 
 ## Where data lives
-- **On each Mac** (source of truth): your name, species, and friend list + invite codes are saved in the app’s UserDefaults. Quitting Mochi keeps your bonds.
-- **On the server**: only a realtime relay + a best-effort invite directory. Live rooms are ephemeral. If Render redeploys and forgets, each app re-attaches with its saved code and the bond comes back — no re-invite needed for already-bonded friends.
-- Optional: set `MOCHI_DATA_DIR` on Render (persistent disk) so the invite file survives redeploys too.
+- **Supabase** (cloud source of truth): name, species, friend list, and bond codes are stored in `mochi_players` + `mochi_bonds`. See `supabase/schema.sql`.
+- **On each Mac**: a local cache (UserDefaults) + a stable `deviceId`, so the app still works offline and then syncs.
+- **Render**: realtime WebSocket relay. Set `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` on the web service.
 
 ## Dev
 ```bash

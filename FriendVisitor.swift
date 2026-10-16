@@ -130,7 +130,18 @@ import AppKit
       bubbleTicks -= 1
       if bubbleTicks == 0 { bubble = nil }
     }
-    if activity == .sleep && tick % 45 == 0 { emit("💤") }
+    if activity == .sleep {
+      let pos = CGPoint(x: headPoint.x - 4, y: headPoint.y + 14)
+      if let i = particles.firstIndex(where: { $0.text == "💤" && $0.vel == .zero }) {
+        particles[i].pos = pos
+        particles[i].life = particles[i].maxLife
+      } else {
+        particles.removeAll { $0.text == "💤" }
+        particles.append(Particle(text: "💤", pos: pos, vel: .zero, life: 9999, maxLife: 9999))
+      }
+    } else {
+      particles.removeAll { $0.text == "💤" && $0.vel == .zero }
+    }
 
     let vf0 = NSScreen.main!.visibleFrame
     switch activity {
@@ -192,6 +203,10 @@ import AppKit
 
     if tick % (activity == .run || activity == .fly ? 5 : 10) == 0 { walkFrame ^= 1 }
     for i in particles.indices {
+      if particles[i].vel == .zero {
+        particles[i].life = particles[i].maxLife
+        continue
+      }
       particles[i].pos.x += particles[i].vel.dx
       particles[i].pos.y += particles[i].vel.dy
       particles[i].life -= 1

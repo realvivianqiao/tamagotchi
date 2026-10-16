@@ -3,12 +3,18 @@ import { createServer } from "http";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { join, extname, dirname } from "path";
 import { fileURLToPath } from "url";
+import {
+  supabaseEnabled,
+  loadBondsFromSupabase,
+  saveBondToSupabase,
+  upsertPlayer,
+  getPlayer,
+} from "./db.js";
 
 const PORT = Number(process.env.PORT || 3847);
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const staticRoots = [join(__dirname, "public"), __dirname];
-// Prefer a persistent disk (Render Disk → MOCHI_DATA_DIR). Fall back to /tmp (wiped on redeploy —
-// clients still recover because bonds live on each Mac and attach recreates rooms).
+// Local file fallback when Supabase isn't configured.
 const DATA_DIR = process.env.MOCHI_DATA_DIR || "/tmp";
 const STORE = join(DATA_DIR, "mochi-invites.json");
 const WAITING_TTL_MS = 7 * 24 * 60 * 60 * 1000; // unclaimed invite
@@ -62,6 +68,17 @@ function inviteAlive(inv, now = Date.now()) {
 }
 
 async function loadInvites() {
+  if (supabaseEnabled) {
+    const map = await loadBondsFromSupabase();
+    if (map) {
+      const now = Date.now();
+      for (const [c, inv] of map) {
+        if (inviteAlive(inv, now)) invites.set(c, inv);
+      }
+      console.log(`loaded ${invites.size} bonds from supabase`);
+      return;
+    }
+  }
   try {
     await mkdir(dirname(STORE), { recursive: true });
     const raw = JSON.parse(await readFile(STORE, "utf8"));
@@ -76,6 +93,10 @@ async function loadInvites() {
 }
 
 async function saveInvites() {
+  if (supabaseEnabled) {
+    await Promise.all([...invites.entries()].map(([c, inv]) => saveBondToSupabase(c, inv)));
+    return;
+  }
   const obj = Object.fromEntries(invites);
   try {
     await mkdir(dirname(STORE), { recursive: true });
@@ -383,8 +404,89 @@ const httpServer = createServer(async (req, res) => {
       ok: true,
       invites: invites.size,
       rooms: rooms.size,
-      store: STORE,
+      store: supabaseEnabled ? "supabase" : STORE,
+      supabase: supabaseEnabled,
     });
+  }
+
+  // Pull cloud profile + friends (Supabase). deviceId is a stable UUID on each Mac.
+  if (req.method === "GET" && url === "/api/me") {
+    const q = new URL(req.url || "/", "http://x").searchParams;
+    const deviceId = String(q.get("deviceId") || "").slice(0, 64);
+    if (!deviceId) return json(res, 400, { error: "deviceId required" });
+    if (!supabaseEnabled) return json(res, 503, { error: "supabase not configured" });
+    const row = await getPlayer(deviceId);
+    if (!row) return json(res, 404, { error: "not found", deviceId });
+    return json(res, 200, {
+      deviceId: row.device_id,
+      displayName: row.display_name,
+      species: row.species,
+      fullness: row.fullness,
+      happiness: row.happiness,
+      friends: row.friends || [],
+      activeCode: row.active_code,
+      updatedAt: row.updated_at,
+    });
+  }
+
+  // Push cloud profile + friends — this is the durable source of truth.
+  if (req.method === "POST" && url === "/api/me") {
+    const body = await readJson(req);
+    const deviceId = String(body.deviceId || "").slice(0, 64);
+    if (!deviceId) return json(res, 400, { error: "deviceId required" });
+    if (!supabaseEnabled) return json(res, 503, { error: "supabase not configured" });
+    const friends = Array.isArray(body.friends)
+      ? body.friends.map((f) => ({
+          code: String(f.code || "").toUpperCase().slice(0, 6),
+          partnerName: String(f.partnerName || "friend").slice(0, 24),
+          online: false,
+          waiting: Boolean(f.waiting),
+          fullness: Number(f.fullness) || 80,
+          happiness: Number(f.happiness) || 80,
+          lastActivity: f.lastActivity ? String(f.lastActivity).slice(0, 80) : null,
+          species: String(f.species || "dog").slice(0, 12),
+        }))
+      : [];
+    const result = await upsertPlayer({
+      deviceId,
+      displayName: body.displayName,
+      species: body.species,
+      fullness: body.fullness,
+      happiness: body.happiness,
+      friends,
+      activeCode: body.activeCode,
+    });
+    if (!result.ok) return json(res, 500, { error: result.error });
+    // Also upsert any bond codes into mochi_bonds so invite directory stays warm.
+    for (const f of friends) {
+      if (!isValidCode(f.code)) continue;
+      const existing = invites.get(f.code);
+      if (f.waiting) {
+        upsertInvite(f.code, {
+          hostName: body.displayName,
+          guestName: null,
+          fullness: f.fullness,
+          happiness: f.happiness,
+          preserveGuest: false,
+        });
+        const inv = invites.get(f.code);
+        if (inv) {
+          inv.guestName = null;
+          inv.hostDeviceId = deviceId;
+        }
+      } else {
+        upsertInvite(f.code, {
+          hostName: existing?.hostName || body.displayName,
+          guestName: f.partnerName,
+          fullness: f.fullness,
+          happiness: f.happiness,
+        });
+        const inv = invites.get(f.code);
+        if (inv && !inv.bondedAt) inv.bondedAt = Date.now();
+      }
+    }
+    await saveInvites();
+    return json(res, 200, { ok: true, deviceId, friends: friends.length });
   }
 
   return serveStatic(req, res);

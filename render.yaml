@@ -9,7 +9,6 @@ services:
     envVars:
       - key: PORT
         value: "10000"
-      # Optional: mount a Render Disk and point here so invites survive redeploys.
-      # Bonds still recover without this — each Mac re-attaches from its saved friend list.
-      # - key: MOCHI_DATA_DIR
-      #   value: /var/data
+      # Add these in the Render dashboard (do not commit secrets):
+      # SUPABASE_URL=https://xxxx.supabase.co
+      # SUPABASE_SERVICE_ROLE_KEY=eyJ...

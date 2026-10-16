@@ -6,16 +6,16 @@
     <description>CoPet updates</description>
     <language>en</language>
     <item>
-      <title>CoPet 0.5.22</title>
-      <pubDate>2026-10-16T03:48:51Z</pubDate>
-      <sparkle:version>33</sparkle:version>
-      <sparkle:shortVersionString>0.5.22</sparkle:shortVersionString>
+      <title>CoPet 0.5.23</title>
+      <pubDate>2026-10-16T03:51:23Z</pubDate>
+      <sparkle:version>34</sparkle:version>
+      <sparkle:shortVersionString>0.5.23</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-      <description><![CDATA[Livelier Spotify dance with music notes; no auto-nap while Dance to Spotify is on.]]></description>
+      <description><![CDATA[Dance is a pet action like Feed; nap fully pauses dance until Wake up.]]></description>
       <enclosure
         url="https://tamagotchi-udtz.onrender.com/CoPet.zip"
-        sparkle:edSignature="gIO80BeiEXK6CNpJRmfeGE0D3fB21C7EbiC0WvlOl5ivzjgnfm20THdBbuiPxVmcZ8JRjfNahuB8DOg3IztjAA=="
-        length="1778139"
+        sparkle:edSignature="vaC4xVYHYCxf2B6Ksm2+MMC/jvpaivM9uOls0sdZDgouC9Yw8x3DtRN7gP9xKlNAsX3QKDqodUt/Qun6cyBWDQ=="
+        length="1777389"
         type="application/octet-stream" />
     </item>
   </channel>

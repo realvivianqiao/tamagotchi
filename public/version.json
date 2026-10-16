@@ -1,6 +1,6 @@
 {
-  "version": "0.5.22",
+  "version": "0.5.23",
   "url": "/CoPet.zip",
-  "notes": "Livelier Spotify dance with music notes; no auto-nap while Dance to Spotify is on.",
-  "publishedAt": "2026-10-16T03:48:51Z"
+  "notes": "Dance is a pet action like Feed; nap fully pauses dance until Wake up.",
+  "publishedAt": "2026-10-16T03:51:23Z"
 }

@@ -538,12 +538,13 @@ import AppKit
 
     activityTicks -= 1
     guard activityTicks <= 0, activity != .held, activity != .fall else { return }
+    // Sticky nap always wins — never stomp sleep for dance or visits.
+    if untilWoken {
+      set(.sleep, seconds: 9_999)
+      return
+    }
     // Don't pick a new wander while a friend is visiting or vibing to Spotify.
     if hostingVisit || visitor?.isVisiting == true || isDanceMode {
-      // Stay awake and ready for the next beat — never auto-nap mid-vibe.
-      if activity == .sleep || untilWoken {
-        untilWoken = false
-      }
       set(.sit, seconds: 1)
       return
     }
@@ -556,8 +557,9 @@ import AppKit
     }
   }
 
-  /// Dance menu on + (hearing music or a recent beat). Blocks idle nap.
+  /// Vibing to Spotify — never while napping.
   private var isDanceMode: Bool {
+    guard !untilWoken, activity != .sleep else { return false }
     guard SpotifyDance.shared.enabled else { return false }
     if dancingToSpotify { return true }
     return lastBeatPulse > 0
@@ -565,7 +567,11 @@ import AppKit
   }
 
   private func chooseNext() {
-    // Dance to Spotify stays on → never drift into idle sleep between tracks.
+    if untilWoken {
+      set(.sleep, seconds: 9_999)
+      return
+    }
+    // Dance to Spotify on (and awake) → stay ready between tracks; no idle nap.
     if SpotifyDance.shared.enabled {
       set(.sit, seconds: 2)
       return
@@ -954,6 +960,10 @@ import AppKit
   private func enterNap(sayLine: Bool) {
     let vf = screenFrame()
     untilWoken = true
+    // Nap pauses the vibe — dance resumes only after Wake up + music.
+    dancingToSpotify = false
+    lastBeatPulse = 0
+    danceStretch = false
     targetX = nil
     vx = 0
     vy = 0
@@ -1518,6 +1528,12 @@ import AppKit
       menu.addItem(item("🍖  Feed", #selector(feed)))
       menu.addItem(item("🎾  Play", #selector(play)))
       menu.addItem(item("❤️  Pet", #selector(petFromMenu)))
+      let danceItem = item(
+        SpotifyDance.shared.enabled ? "🎵  Stop dance" : "🎵  Dance to Spotify",
+        #selector(toggleDanceToSpotify))
+      if SpotifyDance.shared.enabled { danceItem.state = .on }
+      if !SpotifyDance.shared.isAvailable { danceItem.isEnabled = false }
+      menu.addItem(danceItem)
       menu.addItem(item(isAsleep ? "☀️  Wake up" : "💤  Nap", #selector(toggleNap)))
       let speciesItem = NSMenuItem(title: "🐾  Choose pet…", action: nil, keyEquivalent: "")
       let speciesMenu = NSMenu()
@@ -1601,10 +1617,6 @@ import AppKit
     bondsItem.submenu = bondsMenu
     menu.addItem(bondsItem)
     menu.addItem(item("My username / pad…", #selector(onlineSetName), symbol: "pencil"))
-    let danceItem = item("Dance to Spotify", #selector(toggleDanceToSpotify), symbol: "music.note")
-    if SpotifyDance.shared.enabled { danceItem.state = .on }
-    if !SpotifyDance.shared.isAvailable { danceItem.isEnabled = false }
-    menu.addItem(danceItem)
     menu.addItem(item("Check for updates…", #selector(checkForUpdates), symbol: "arrow.triangle.2.circlepath"))
     menu.addItem(.separator())
     menu.addItem(item("Quit", #selector(quit), symbol: "xmark.circle"))
@@ -1619,15 +1631,20 @@ import AppKit
     if dance.enabled {
       dance.setEnabled(false)
       dancingToSpotify = false
+      lastBeatPulse = 0
       say("ok, quiet mode", seconds: 2)
       logApp("spotify_dance_off")
+      return
+    }
+    if untilWoken || activity == .sleep {
+      say("wake me up first 💤", seconds: 2.2)
       return
     }
     let a = NSAlert()
     a.messageText = "Dance to Spotify?"
     a.informativeText =
-      "Mochi listens only to the Spotify desktop app (speakers or Bluetooth headphones — both fine) and finds the beat on-device. Allow CoPet under System Settings → Privacy & Security → Screen & System Audio Recording when asked. Also allow Automation → Spotify if macOS prompts."
-    a.addButton(withTitle: "Turn on")
+      "Same as Feed or Play — but for music. Mochi listens only to the Spotify desktop app and dances on the beat. Speakers or Bluetooth headphones both work. Allow audio capture (and Spotify Automation) if macOS asks. Nap pauses the dance until you wake them."
+    a.addButton(withTitle: "Dance")
     a.addButton(withTitle: "Cancel")
     NSApp.activate(ignoringOtherApps: true)
     guard a.runModal() == .alertFirstButtonReturn else { return }
@@ -1640,43 +1657,36 @@ import AppKit
     let dance = SpotifyDance.shared
     dance.onBeat = { [weak self] in self?.pulseToBeat() }
     dance.onTrackChange = { [weak self] track in
-      guard let self, dance.enabled else { return }
+      guard let self, dance.enabled, !self.untilWoken, self.activity != .sleep else { return }
       self.say("vibing to \(track.name)", seconds: 2.4, force: false)
     }
     dance.onPlayingChange = { [weak self] playing in
       guard let self else { return }
-      self.dancingToSpotify = playing && dance.enabled
-      if playing, dance.enabled {
-        self.untilWoken = false
-        if self.activity == .sleep {
-          self.set(.sit, seconds: 1)
-          self.say("🎵", seconds: 1.2)
-        }
+      // Nap always wins — music does not wake a sticky sleep.
+      if self.untilWoken || self.activity == .sleep {
+        self.dancingToSpotify = false
+        return
       }
+      self.dancingToSpotify = playing && dance.enabled
     }
     dance.onError = { [weak self] message in
-      // Short tip — full Settings path is in the alert if they re-toggle.
+      guard let self, !self.untilWoken, self.activity != .sleep else { return }
       if message.localizedCaseInsensitiveContains("Screen & System Audio") {
-        self?.say("need audio permission…", seconds: 3.2)
+        self.say("need audio permission…", seconds: 3.2)
       } else if message.localizedCaseInsensitiveContains("isn’t running") {
-        self?.say("open Spotify first", seconds: 2.5)
+        self.say("open Spotify first", seconds: 2.5)
       } else {
-        self?.say("can’t hear Spotify…", seconds: 2.8)
+        self.say("can’t hear Spotify…", seconds: 2.8)
       }
     }
     if dance.enabled { dance.start() }
   }
 
-  /// Varied hop / squash / notes on each local beat while Dance to Spotify is active.
+  /// Varied hop / squash / notes on each beat. Sleep fully blocks this.
   private func pulseToBeat() {
-    guard SpotifyDance.shared.enabled, (dancingToSpotify || isDanceMode), !hidden, !grabbing
-    else { return }
-    // Music wins over idle nap.
-    if untilWoken || activity == .sleep {
-      untilWoken = false
-      particles.removeAll { $0.text == "💤" || $0.text == "🫧" }
-      set(.sit, seconds: 1)
-    }
+    guard SpotifyDance.shared.enabled, !hidden, !grabbing else { return }
+    guard !untilWoken, activity != .sleep else { return }
+    guard dancingToSpotify || isDanceMode else { return }
     let now = ProcessInfo.processInfo.systemUptime
     guard now - lastBeatPulse > 0.20 else { return }
     lastBeatPulse = now
@@ -1693,26 +1703,26 @@ import AppKit
     danceStretch = false
 
     switch danceStep {
-    case 0: // bounce
+    case 0:
       squashTicks = max(squashTicks, 8)
       if grounded { startFall(vx: 0, vy: CGFloat.random(in: 5.5...7.5)) }
-    case 1: // side hop
+    case 1:
       squashTicks = max(squashTicks, 6)
       if grounded {
         startFall(vx: dir * CGFloat.random(in: 1.8...3.2), vy: CGFloat.random(in: 4.5...6.5))
       }
-    case 2: // groove squash (no hop)
+    case 2:
       squashTicks = max(squashTicks, 11)
-    case 3: // stretch up then hop
+    case 3:
       danceStretch = true
       squashTicks = max(squashTicks, 9)
       if grounded { startFall(vx: 0, vy: CGFloat.random(in: 7...10)) }
       emit("🎶")
-    case 4: // flip + hop
+    case 4:
       dir = -dir
       squashTicks = max(squashTicks, 7)
       if grounded { startFall(vx: dir * 2.2, vy: 6) }
-    default: // shimmy
+    default:
       squashTicks = max(squashTicks, 10)
       if grounded {
         startFall(vx: CGFloat.random(in: -2.5...2.5), vy: CGFloat.random(in: 3.5...5.5))

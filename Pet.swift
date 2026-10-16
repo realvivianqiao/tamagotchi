@@ -790,16 +790,20 @@ import AppKit
     activityTicks = Int(2 * fps)
   }
 
+  /// Feed / play / pet / poke should get them out of a sticky nap.
+  @discardableResult
+  private func wakeIfNapping() -> Bool {
+    guard untilWoken || activity == .sleep else { return false }
+    wakeStickyNap()
+    return true
+  }
+
   // MARK: Actions
 
   private func pet() {
+    _ = wakeIfNapping()
     happiness = min(100, happiness + 6)
     happyTicks = Int(2.5 * fps)
-    if untilWoken || activity == .sleep {
-      sayFresh(["mmh… 💤", "zzz… nice", "soft…", "dream pets…", "don't stop (asleep)", "cozy…", "mmh", "zzz ❤️", "keep going…", "sleepy pats"])
-      pushOnline()
-      return
-    }
     switch species {
     case .dog:
       emit("❤️", count: 4)
@@ -820,15 +824,10 @@ import AppKit
 
   @objc private func feed() {
     // Always feed *your* pet — never no-op. Full pets still eat (second breakfast).
+    _ = wakeIfNapping()
     let wasFull = fullness >= 95
     fullness = min(100, fullness + 35)
     happiness = min(100, happiness + (wasFull ? 2 : 4))
-    if untilWoken {
-      sayFresh(PetLines.feedAsleep(species, secondBreakfast: wasFull))
-      emit("🍖")
-      pushOnline()
-      return
-    }
     set(.eat, seconds: 3.5)
     sayFresh(PetLines.feed(species, secondBreakfast: wasFull))
     switch species {
@@ -840,13 +839,9 @@ import AppKit
   }
 
   @objc private func play() {
+    _ = wakeIfNapping()
     happiness = min(100, happiness + 12)
     fullness = max(0, fullness - 3)
-    if untilWoken {
-      sayFresh(PetLines.playAsleep(species))
-      pushOnline()
-      return
-    }
     startSignatureMove(seconds: 7)
     pushOnline()
   }

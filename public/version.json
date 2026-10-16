@@ -1,6 +1,6 @@
 {
-  "version": "0.4.4",
+  "version": "0.4.5",
   "url": "/CoPet.zip",
-  "notes": "Menu actions show SF Symbol icons.",
-  "publishedAt": "2026-10-16T02:05:58Z"
+  "notes": "Feed, play, and pet wake a napping pet.",
+  "publishedAt": "2026-10-16T02:07:29Z"
 }

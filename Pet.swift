@@ -1104,26 +1104,25 @@ import AppKit
 
   func menuNeedsUpdate(_ menu: NSMenu) {
     menu.removeAllItems()
-    menu.addItem(info("🍖 Fullness    \(bar(fullness))"))
-    menu.addItem(info("💛 Happiness  \(bar(happiness))"))
+    menu.addItem(info("Fullness   \(bar(fullness))"))
+    menu.addItem(info("Happiness  \(bar(happiness))"))
 
     let friends = Online.shared.friends
     let onlineN = friends.filter { $0.online && !$0.waiting }.count
-    menu.addItem(info("👥 Friends     \(friends.count) total · \(onlineN) online"))
+    menu.addItem(info("Friends    \(friends.count) · \(onlineN) online"))
 
     if let note = onlineNote {
-      // Status only — does not retarget Feed / Quit away from your pet.
-      menu.addItem(info("🔗 \(note)"))
+      menu.addItem(info(note))
     }
     menu.addItem(.separator())
-    // YOUR pet — Feed always targets you, never the friend you're watching.
+
     if !hidden {
-      menu.addItem(info("—— \(petName) \(species.emoji) (you) ——"))
-      menu.addItem(item("👉 Poke", #selector(pokeSelf)))
-      menu.addItem(item("🍖 Feed", #selector(feed)))
-      menu.addItem(item("🎾 Play", #selector(play)))
-      menu.addItem(item("✋ Pet", #selector(petFromMenu)))
-      menu.addItem(item(activity == .sleep ? "☀️ Wake up" : "💤 Nap", #selector(toggleNap)))
+      menu.addItem(info(petName))
+      menu.addItem(item("Poke", #selector(pokeSelf)))
+      menu.addItem(item("Feed", #selector(feed)))
+      menu.addItem(item("Play", #selector(play)))
+      menu.addItem(item("Pet", #selector(petFromMenu)))
+      menu.addItem(item(activity == .sleep ? "Wake up" : "Nap", #selector(toggleNap)))
       let speciesItem = NSMenuItem(title: "Choose pet…", action: nil, keyEquivalent: "")
       let speciesMenu = NSMenu()
       for sp in Species.allCases {
@@ -1141,7 +1140,6 @@ import AppKit
       menu.addItem(.separator())
     }
 
-    // Friends ▸ each person is a nested menu (name once, short actions)
     let friendsItem = NSMenuItem(
       title: "Friends (\(friends.count))",
       action: nil,
@@ -1151,9 +1149,9 @@ import AppKit
       sub.addItem(info("No friends yet — Invite or Claim"))
     } else {
       for f in friends {
-        let dot = f.waiting ? "⏳" : (f.online ? "🟢" : "⚪️")
+        let mark = f.waiting ? "waiting" : (f.online ? "online" : "away")
         let label = f.waiting ? "code \(f.code)" : shortFriendName(f.partnerName)
-        let row = NSMenuItem(title: "\(dot)  \(label)", action: nil, keyEquivalent: "")
+        let row = NSMenuItem(title: "\(label)  ·  \(mark)", action: nil, keyEquivalent: "")
         if f.code == Online.shared.activeCode { row.state = .on }
         let person = NSMenu()
 
@@ -1161,7 +1159,7 @@ import AppKit
           person.addItem(info("Waiting for them to join"))
           person.addItem(info("Code \(f.code)"))
         } else {
-          person.addItem(info("\(f.petSpecies.emoji) \(f.petSpecies.title)   🍖 \(Int(f.fullness))%   💛 \(Int(f.happiness))%"))
+          person.addItem(info("\(f.petSpecies.defaultName)  ·  full \(Int(f.fullness))%  ·  happy \(Int(f.happiness))%"))
           if let act = friendlyActivity(f.lastActivity) {
             person.addItem(info(act))
           }
@@ -1222,7 +1220,7 @@ import AppKit
     }
     menu.addItem(item("My name…", #selector(onlineSetName)))
     menu.addItem(.separator())
-    menu.addItem(item("Quit \(petName)", #selector(quit)))
+    menu.addItem(item("Quit CoPet", #selector(quit)))
   }
 
   private func item(_ title: String, _ action: Selector) -> NSMenuItem {

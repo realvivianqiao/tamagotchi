@@ -31,7 +31,7 @@ import Foundation
   /// True when we should dance: Spotify reports playing, or we hear audio on the tap.
   private(set) var isHearingMusic = false
 
-  var onBeat: (() -> Void)?
+  var onBeat: ((Double) -> Void)?
   var onTrackChange: ((Track) -> Void)?
   var onPlayingChange: ((Bool) -> Void)?
   var onError: ((String) -> Void)?
@@ -47,8 +47,8 @@ import Foundation
 
   private init() {
     enabled = UserDefaults.standard.bool(forKey: Self.defaultsKey)
-    tracker.onBeat = { [weak self] in
-      Task { @MainActor in self?.onBeat?() }
+    tracker.onBeat = { [weak self] strength in
+      Task { @MainActor in self?.onBeat?(strength) }
     }
   }
 

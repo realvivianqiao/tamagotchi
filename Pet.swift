@@ -64,6 +64,7 @@ import AppKit
   private var dancingToSpotify = false
   private var lastBeatPulse: TimeInterval = 0
   private var danceStep = 0
+  private var lastBeatStrength: Double = 0.6
   /// When true, beat squash stretches tall instead of flat (PetView).
   private(set) var danceStretch = false
 
@@ -1655,7 +1656,10 @@ import AppKit
 
   private func wireSpotifyDance() {
     let dance = SpotifyDance.shared
-    dance.onBeat = { [weak self] in self?.pulseToBeat() }
+    dance.onBeat = { [weak self] strength in
+      self?.lastBeatStrength = strength
+      self?.pulseToBeat()
+    }
     dance.onTrackChange = { [weak self] track in
       guard let self, dance.enabled, !self.untilWoken, self.activity != .sleep else { return }
       self.say("vibing to \(track.name)", seconds: 2.4, force: false)
@@ -1682,55 +1686,53 @@ import AppKit
     if dance.enabled { dance.start() }
   }
 
-  /// Varied hop / squash / notes on each beat. Sleep fully blocks this.
+  /// Pulse on the locked beat grid. Sleep fully blocks this.
+  /// Most beats = quick squash (reads on tempo). Bigger hops only on accents
+  /// so the pet can land before the next kick — otherwise it looks off-beat.
   private func pulseToBeat() {
     guard SpotifyDance.shared.enabled, !hidden, !grabbing else { return }
     guard !untilWoken, activity != .sleep else { return }
     guard dancingToSpotify || isDanceMode else { return }
     let now = ProcessInfo.processInfo.systemUptime
-    guard now - lastBeatPulse > 0.20 else { return }
+    guard now - lastBeatPulse > 0.16 else { return }
     lastBeatPulse = now
     dancingToSpotify = true
-    happyTicks = max(happyTicks, Int(0.55 * fps))
+    happyTicks = max(happyTicks, Int(0.45 * fps))
     walkFrame ^= 1
-    danceStep = (danceStep + 1) % 6
+    danceStep += 1
+    let strength = lastBeatStrength
+    let accent = strength >= 0.85 || danceStep % 4 == 1
 
-    let notes = ["🎵", "🎶", "♪", "♫", "✨"]
-    emit(notes.randomElement()!, count: Int.random(in: 1...2))
+    emit(accent ? "🎵" : (Bool.random() ? "♪" : "🎶"), count: accent ? 2 : 1)
 
     let floorY = restFloor(in: screenFrame())
-    let grounded = activity != .held && y <= floorY + 4
+    let grounded = activity != .held && activity != .fall && y <= floorY + 3
     danceStretch = false
 
-    switch danceStep {
-    case 0:
-      squashTicks = max(squashTicks, 8)
-      if grounded { startFall(vx: 0, vy: CGFloat.random(in: 5.5...7.5)) }
-    case 1:
-      squashTicks = max(squashTicks, 6)
-      if grounded {
-        startFall(vx: dir * CGFloat.random(in: 1.8...3.2), vy: CGFloat.random(in: 4.5...6.5))
-      }
-    case 2:
-      squashTicks = max(squashTicks, 11)
-    case 3:
-      danceStretch = true
-      squashTicks = max(squashTicks, 9)
-      if grounded { startFall(vx: 0, vy: CGFloat.random(in: 7...10)) }
-      emit("🎶")
-    case 4:
-      dir = -dir
-      squashTicks = max(squashTicks, 7)
-      if grounded { startFall(vx: dir * 2.2, vy: 6) }
-    default:
-      squashTicks = max(squashTicks, 10)
-      if grounded {
-        startFall(vx: CGFloat.random(in: -2.5...2.5), vy: CGFloat.random(in: 3.5...5.5))
+    // Always bob with the kick.
+    squashTicks = max(squashTicks, accent ? 9 : 6)
+
+    if accent, grounded {
+      // Cycle a few accent moves — still on the downbeat.
+      switch danceStep % 8 {
+      case 1:
+        startFall(vx: 0, vy: 5.5)
+      case 3:
+        startFall(vx: dir * 2.0, vy: 5.0)
+      case 5:
+        danceStretch = true
+        squashTicks = max(squashTicks, 10)
+        startFall(vx: 0, vy: 6.5)
+      case 7:
+        dir = -dir
+        startFall(vx: dir * 1.8, vy: 5.2)
+      default:
+        break
       }
     }
 
-    if Int.random(in: 0..<10) == 0 {
-      say(["🎵", "🎶", "♪~", "vibe!", "💃"].randomElement()!, seconds: 1.1, force: false)
+    if accent, Int.random(in: 0..<6) == 0 {
+      say(["🎵", "🎶", "♪~"].randomElement()!, seconds: 0.9, force: false)
     }
     render()
   }

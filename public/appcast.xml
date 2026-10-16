@@ -6,16 +6,16 @@
     <description>CoPet updates</description>
     <language>en</language>
     <item>
-      <title>CoPet 0.5.17</title>
-      <pubDate>2026-10-16T03:23:24Z</pubDate>
-      <sparkle:version>28</sparkle:version>
-      <sparkle:shortVersionString>0.5.17</sparkle:shortVersionString>
+      <title>CoPet 0.5.18</title>
+      <pubDate>2026-10-16T03:27:00Z</pubDate>
+      <sparkle:version>29</sparkle:version>
+      <sparkle:shortVersionString>0.5.18</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-      <description><![CDATA[Only one bounce when the pet lands from a fall.]]></description>
+      <description><![CDATA[Unstick mid-air pads; dragging always works.]]></description>
       <enclosure
         url="https://tamagotchi-udtz.onrender.com/CoPet.zip"
-        sparkle:edSignature="CTu6wPxvdNDymMFpgAkvKrRuFop3hbJ7iUJdq1XKWudX4qalrkPxenFCwUUX8rTQ7v+WztkeEyGzmhmH58QiDw=="
-        length="1712565"
+        sparkle:edSignature="1OfNXnMuvqZUMzA4FA+eus23mQQzsfi+YZ5PhMOiHvFCgci3hRptZYqfI2xVaJl6PpnEsOw9xicdtxxLc4yiCw=="
+        length="1713838"
         type="application/octet-stream" />
     </item>
   </channel>

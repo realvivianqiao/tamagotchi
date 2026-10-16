@@ -1,6 +1,6 @@
 {
-  "version": "0.5.17",
+  "version": "0.5.18",
   "url": "/CoPet.zip",
-  "notes": "Only one bounce when the pet lands from a fall.",
-  "publishedAt": "2026-10-16T03:23:24Z"
+  "notes": "Unstick mid-air pads; dragging always works.",
+  "publishedAt": "2026-10-16T03:27:00Z"
 }

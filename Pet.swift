@@ -67,6 +67,9 @@ import AppKit
   private var lastDragTime: TimeInterval = 0
   private var throwVelocity = CGVector.zero
   private var dragged = false
+  /// True from mouseDown through mouseUp so hit-testing can’t drop the drag mid-air.
+  private var grabbing = false
+  private var visitStartedAt: TimeInterval = 0
 
   override init() {
     let screen = NSScreen.main!.visibleFrame
@@ -333,14 +336,26 @@ import AppKit
   }
 
   private func move(in vf: CGRect) {
+    // Never freeze physics while the user is dragging.
+    if grabbing || activity == .held { return }
+
+    // Safety: a stalled visit must not pin the pad mid-air forever.
+    if hostingVisit, visitStartedAt > 0,
+       ProcessInfo.processInfo.systemUptime - visitStartedAt > 6
+    {
+      hostingVisit = false
+      visitor?.dismiss()
+      visitor = nil
+    }
+
     // Don't stroll away mid-visit — guest is glued to you.
     if hostingVisit || visitor?.isVisiting == true {
       if activity == .walk || activity == .run || activity == .fly || activity == .glide {
-        // Hold still (hops / sit reactions still ok via performHostSideVisit).
+        // Sit still at rest height — never freeze mid-flight forever.
+        y = restFloor(in: vf)
         if activity == .fly || activity == .glide {
-          // keep height, zero wander
-        } else {
-          y = restFloor(in: vf)
+          activity = .sit
+          activityTicks = Int(1.5 * fps)
         }
         return
       }
@@ -727,7 +742,8 @@ import AppKit
     }
     let ground = CGFloat(Canvas.h - 1 - sprite.canvas.bottomRow) * scale
     window.setFrameOrigin(CGPoint(x: (x - windowSize.width / 2).rounded(), y: (y - ground).rounded()))
-    window.ignoresMouseEvents = !(activity == .held || isOverDog(NSEvent.mouseLocation))
+    // Keep receiving mouse while grabbing/dragging — mid-air pads are easy to lose otherwise.
+    window.ignoresMouseEvents = !(grabbing || activity == .held || isOverDog(NSEvent.mouseLocation))
     view.needsDisplay = true
   }
 
@@ -801,12 +817,22 @@ import AppKit
   // MARK: Mouse
 
   func grab(clickCount: Int = 1) {
+    // Break out of any stuck visit / freeze so the pad is always grab-able.
+    hostingVisit = false
+    if visitor != nil {
+      visitor?.dismiss()
+      visitor = nil
+    }
+    grabbing = true
+    window.ignoresMouseEvents = false
+
     // Double-click → nap if awake, wake if asleep (same as menu Nap / Wake up).
     if clickCount >= 2 {
       pendingPetWork?.cancel()
       pendingPetWork = nil
       swallowRelease = true
       dragged = false
+      grabbing = false
       toggleNap()
       return
     }
@@ -817,11 +843,14 @@ import AppKit
     grabOffset = CGPoint(x: x - m.x, y: y - m.y)
     throwVelocity = .zero
     dragged = false
+    activity = .held
+    activityTicks = Int(60 * fps)
     logApp("grab_start")
   }
 
   func drag() {
     if swallowRelease { return }
+    grabbing = true
     let m = NSEvent.mouseLocation
     if !dragged {
       guard hypot(m.x - grabStart.x, m.y - grabStart.y) > 3 else { return }
@@ -850,6 +879,7 @@ import AppKit
   }
 
   func release(clickCount: Int = 1) {
+    grabbing = false
     if swallowRelease {
       swallowRelease = false
       return
@@ -1115,6 +1145,7 @@ import AppKit
     visitor?.dismiss()
     visitor = nil
     hostingVisit = true
+    visitStartedAt = ProcessInfo.processInfo.systemUptime
     // Plant yourself so the guest can spawn on your hip.
     let vf = screenFrame()
     y = restFloor(in: vf)
@@ -1151,6 +1182,7 @@ import AppKit
     v.beginVisit(action: action, label: label, role: role) { [weak self] in
       guard let self else { return }
       self.hostingVisit = false
+      self.visitStartedAt = 0
       self.bubble = nil
       self.bubbleTicks = 0
       // Always clear the guest pad after the visit — only your pet stays.
@@ -1162,8 +1194,9 @@ import AppKit
     // Belt-and-suspenders: force-dismiss if anything stalls past 5s.
     let visitCode = code
     DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
-      guard let self, self.visitor?.code == visitCode else { return }
+      guard let self, self.visitor?.code == visitCode || self.hostingVisit else { return }
       self.hostingVisit = false
+      self.visitStartedAt = 0
       self.visitor?.dismiss()
       self.visitor = nil
       self.bubble = nil

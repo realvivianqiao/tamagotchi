@@ -6,16 +6,16 @@
     <description>CoPet updates</description>
     <language>en</language>
     <item>
-      <title>CoPet 0.5.18</title>
-      <pubDate>2026-10-16T03:27:00Z</pubDate>
-      <sparkle:version>29</sparkle:version>
-      <sparkle:shortVersionString>0.5.18</sparkle:shortVersionString>
+      <title>CoPet 0.5.19</title>
+      <pubDate>2026-10-16T03:37:19Z</pubDate>
+      <sparkle:version>30</sparkle:version>
+      <sparkle:shortVersionString>0.5.19</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-      <description><![CDATA[Unstick mid-air pads; dragging always works.]]></description>
+      <description><![CDATA[Opt-in Dance to Spotify: tap Spotify desktop audio, find the beat on-device, pulse the pet.]]></description>
       <enclosure
         url="https://tamagotchi-udtz.onrender.com/CoPet.zip"
-        sparkle:edSignature="1OfNXnMuvqZUMzA4FA+eus23mQQzsfi+YZ5PhMOiHvFCgci3hRptZYqfI2xVaJl6PpnEsOw9xicdtxxLc4yiCw=="
-        length="1713838"
+        sparkle:edSignature="bT9V2VsFDmFE2pUlkyt+/w5DQ9trAN2HrQO7nwvkxKTKx05KIVouzKIw7UGjGB5uCuKxddZQ85noNg/uTmc5Bw=="
+        length="1771414"
         type="application/octet-stream" />
     </item>
   </channel>

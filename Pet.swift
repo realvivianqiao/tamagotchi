@@ -60,6 +60,9 @@ import AppKit
   private var lastVisitKey: String?
   private var lastVisitAt: TimeInterval = 0
   private static let visitActions: Set<String> = ["feed", "play", "pet", "poke", "nap"]
+  /// Spotify is playing and Dance to Spotify is on — pulse on beat, chill wander.
+  private var dancingToSpotify = false
+  private var lastBeatPulse: TimeInterval = 0
 
   private var grabStart = CGPoint.zero, lastMouse = CGPoint.zero, grabOffset = CGPoint.zero
   private var swallowRelease = false // double-click nap/wake — don't also pet()
@@ -109,6 +112,7 @@ import AppKit
     window.orderFrontRegardless()
     restoreNapIfNeeded()
     wireAmbientGreetings()
+    wireSpotifyDance()
 
     NotificationCenter.default.addObserver(
       forName: NSApplication.didChangeScreenParametersNotification,
@@ -531,8 +535,8 @@ import AppKit
 
     activityTicks -= 1
     guard activityTicks <= 0, activity != .held, activity != .fall else { return }
-    // Don't pick a new wander while a friend is visiting.
-    if hostingVisit || visitor?.isVisiting == true {
+    // Don't pick a new wander while a friend is visiting or vibing to Spotify.
+    if hostingVisit || visitor?.isVisiting == true || dancingToSpotify {
       set(.sit, seconds: 1)
       return
     }
@@ -1594,9 +1598,74 @@ import AppKit
     bondsItem.submenu = bondsMenu
     menu.addItem(bondsItem)
     menu.addItem(item("My username / pad…", #selector(onlineSetName), symbol: "pencil"))
+    let danceItem = item("Dance to Spotify", #selector(toggleDanceToSpotify), symbol: "music.note")
+    if SpotifyDance.shared.enabled { danceItem.state = .on }
+    if !SpotifyDance.shared.isAvailable { danceItem.isEnabled = false }
+    menu.addItem(danceItem)
     menu.addItem(item("Check for updates…", #selector(checkForUpdates), symbol: "arrow.triangle.2.circlepath"))
     menu.addItem(.separator())
     menu.addItem(item("Quit", #selector(quit), symbol: "xmark.circle"))
+  }
+
+  @objc private func toggleDanceToSpotify() {
+    let dance = SpotifyDance.shared
+    guard dance.isAvailable else {
+      alert("Dance to Spotify needs macOS 14.2 or later so Mochi can tap Spotify’s audio.")
+      return
+    }
+    if dance.enabled {
+      dance.setEnabled(false)
+      dancingToSpotify = false
+      say("ok, quiet mode", seconds: 2)
+      logApp("spotify_dance_off")
+      return
+    }
+    let a = NSAlert()
+    a.messageText = "Dance to Spotify?"
+    a.informativeText =
+      "Mochi listens only to the Spotify desktop app (not calls, YouTube, or notifications) and finds the beat on-device. macOS will ask once for audio-capture permission under Screen & System Audio Recording."
+    a.addButton(withTitle: "Turn on")
+    a.addButton(withTitle: "Cancel")
+    NSApp.activate(ignoringOtherApps: true)
+    guard a.runModal() == .alertFirstButtonReturn else { return }
+    dance.setEnabled(true)
+    say("put on a song 🎵", seconds: 2.5)
+    logApp("spotify_dance_on")
+  }
+
+  private func wireSpotifyDance() {
+    let dance = SpotifyDance.shared
+    dance.onBeat = { [weak self] in self?.pulseToBeat() }
+    dance.onTrackChange = { [weak self] track in
+      guard let self, self.dancingToSpotify || dance.enabled else { return }
+      self.say("vibing to \(track.name)", seconds: 2.4, force: false)
+    }
+    dance.onPlayingChange = { [weak self] playing in
+      guard let self else { return }
+      self.dancingToSpotify = playing && dance.enabled
+      if !playing, self.activity == .fall {
+        // Let the current micro-hop land; no extra work.
+      }
+    }
+    if dance.enabled { dance.start() }
+  }
+
+  /// Squash + tiny hop on each local beat while Dance to Spotify is active.
+  private func pulseToBeat() {
+    guard dancingToSpotify, !hidden, !untilWoken, !grabbing else { return }
+    let now = ProcessInfo.processInfo.systemUptime
+    guard now - lastBeatPulse > 0.22 else { return }
+    lastBeatPulse = now
+    squashTicks = max(squashTicks, 7)
+    happyTicks = max(happyTicks, Int(0.4 * fps))
+    walkFrame ^= 1
+    let floor = restFloor(in: screenFrame())
+    if activity != .held, activity != .fly, activity != .glide,
+       y <= floor + 3
+    {
+      startFall(vx: vx * 0.2, vy: 4.2)
+    }
+    render()
   }
 
   @objc private func checkForUpdates() {

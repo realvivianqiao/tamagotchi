@@ -10,7 +10,7 @@ APP=build/CoPet.app
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 MIN=13.0
 SPARKLE_FLAGS=(-F vendor -framework Sparkle -Xlinker -rpath -Xlinker @executable_path/../Frameworks)
-SRCS="main.swift Sprites.swift PetLines.swift PetView.swift Pet.swift Online.swift FriendVisitor.swift PetPicker.swift Updater.swift Ambient.swift"
+SRCS="main.swift Sprites.swift PetLines.swift PetView.swift Pet.swift Online.swift FriendVisitor.swift PetPicker.swift Updater.swift Ambient.swift BeatTracker.swift SpotifyTap.swift SpotifyDance.swift"
 
 swiftc -O -swift-version 5 -target "arm64-apple-macosx${MIN}" \
   "${SPARKLE_FLAGS[@]}" $SRCS -o /tmp/CoPet-arm64

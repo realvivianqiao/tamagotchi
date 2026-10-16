@@ -1,6 +1,6 @@
 {
-  "version": "0.5.18",
+  "version": "0.5.19",
   "url": "/CoPet.zip",
-  "notes": "Unstick mid-air pads; dragging always works.",
-  "publishedAt": "2026-10-16T03:27:00Z"
+  "notes": "Opt-in Dance to Spotify: tap Spotify desktop audio, find the beat on-device, pulse the pet.",
+  "publishedAt": "2026-10-16T03:37:19Z"
 }

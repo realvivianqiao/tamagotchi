@@ -6,16 +6,16 @@
     <description>CoPet updates</description>
     <language>en</language>
     <item>
-      <title>CoPet 0.5.37</title>
-      <pubDate>2026-10-16T14:35:46Z</pubDate>
-      <sparkle:version>48</sparkle:version>
-      <sparkle:shortVersionString>0.5.37</sparkle:shortVersionString>
+      <title>CoPet 0.5.38</title>
+      <pubDate>2026-10-16T14:40:03Z</pubDate>
+      <sparkle:version>49</sparkle:version>
+      <sparkle:shortVersionString>0.5.38</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-      <description><![CDATA[Double-click hides the pet; body-part clicks; Poke/Play/Talk only; stretch reminders; friendship tallies; feedback fix.]]></description>
+      <description><![CDATA[Double-click hides the pet (not nap). Bring back from the menu-bar emoji.]]></description>
       <enclosure
         url="https://tamagotchi-udtz.onrender.com/CoPet.zip"
-        sparkle:edSignature="0QID6AeXlc9xvO6wet9E62eIhB/fl3KJrq/9z21Zy2QIydGrEgjxxGrtPM8pbbti/I2dUyth7tI9lCtOY9vtDA=="
-        length="1754208"
+        sparkle:edSignature="fXgAdNRvIkCri6+hzRKMofKWH7vrxXtP/7tx3fIPJerGm9VtqfL3O5HYIqrqCphdJ8gB6Pbt3K6F81TTFqn0Bw=="
+        length="1755109"
         type="application/octet-stream" />
     </item>
   </channel>

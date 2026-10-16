@@ -79,8 +79,11 @@ import AppKit
   /// Which body part the current press landed on (nose / head / tail…).
   private var grabPart: BodyPart = .body
   private var swallowRelease = false // double-click hide — don't also body-touch
-  /// Wall-clock of last click-up — backup double-click detect if clickCount is flaky.
-  private var lastClickReleaseAt: TimeInterval = 0
+  /// Our own double-click counter — NSPanel clickCount is unreliable for floating pets.
+  private var pressCount = 0
+  private var pressAt: TimeInterval = 0
+  /// Bumped on double-click hide so a deferred single-click touch can’t still fire.
+  private var touchGeneration = 0
   private var pendingPetWork: DispatchWorkItem?
   private var lastDragTime: TimeInterval = 0
   private var throwVelocity = CGVector.zero
@@ -1117,11 +1120,24 @@ import AppKit
     grabbing = true
     window.ignoresMouseEvents = false
 
-    // Double-click → disappear (not nap). Show again from the menu-bar emoji.
-    if clickCount >= 2 {
+    // Double-click → disappear (never nap / wake). Menu-bar emoji → Show.
+    let now = ProcessInfo.processInfo.systemUptime
+    if now - pressAt <= NSEvent.doubleClickInterval {
+      pressCount += 1
+    } else {
+      pressCount = 1
+    }
+    pressAt = now
+    if clickCount >= 2 || pressCount >= 2 {
+      pressCount = 0
+      touchGeneration &+= 1
+      pendingPetWork?.cancel()
+      pendingPetWork = nil
+      dragged = false
       setHidden(true)
       return
     }
+
     swallowRelease = false
     let m = NSEvent.mouseLocation
     grabStart = m
@@ -1171,23 +1187,38 @@ import AppKit
       swallowRelease = false
       return
     }
+    // Second click sometimes lands on mouseUp with clickCount=2 (NSPanel quirk).
+    if !dragged, clickCount >= 2 {
+      pressCount = 0
+      touchGeneration &+= 1
+      pendingPetWork?.cancel()
+      pendingPetWork = nil
+      setHidden(true)
+      return
+    }
     if !dragged {
-      let now = ProcessInfo.processInfo.systemUptime
-      // Double-click (system count or two quick click-ups) → hide, never nap.
-      if clickCount >= 2 || (lastClickReleaseAt > 0 && now - lastClickReleaseAt <= NSEvent.doubleClickInterval) {
-        lastClickReleaseAt = 0
-        pendingPetWork?.cancel()
-        pendingPetWork = nil
-        setHidden(true)
-        return
-      }
-      lastClickReleaseAt = now
-      // Defer body-touch so a second click can hide instead.
+      // Defer body-touch so a second press can hide instead of petting/waking.
       pendingPetWork?.cancel()
       let part = grabPart
+      let gen = touchGeneration
       let work = DispatchWorkItem { [weak self] in
         self?.pendingPetWork = nil
-        guard let self, !self.hidden else { return }
+        guard let self, !self.hidden, self.touchGeneration == gen else { return }
+        self.touchBody(part)
+      }
+      pendingPetWork = work
+      DispatchQueue.main.asyncAfter(deadline: .now() + NSEvent.doubleClickInterval, execute: work)
+      return
+    }
+    // Tiny jitter between clicks shouldn't count as a drag → edge nap.
+    let dragDist = hypot(NSEvent.mouseLocation.x - grabStart.x, NSEvent.mouseLocation.y - grabStart.y)
+    if dragDist < 12 {
+      pendingPetWork?.cancel()
+      let part = grabPart
+      let gen = touchGeneration
+      let work = DispatchWorkItem { [weak self] in
+        self?.pendingPetWork = nil
+        guard let self, !self.hidden, self.touchGeneration == gen else { return }
         self.touchBody(part)
       }
       pendingPetWork = work

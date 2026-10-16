@@ -1,6 +1,6 @@
 {
-  "version": "0.5.37",
+  "version": "0.5.38",
   "url": "/CoPet.zip",
-  "notes": "Double-click hides the pet; body-part clicks; Poke/Play/Talk only; stretch reminders; friendship tallies; feedback fix.",
-  "publishedAt": "2026-10-16T14:35:46Z"
+  "notes": "Double-click hides the pet (not nap). Bring back from the menu-bar emoji.",
+  "publishedAt": "2026-10-16T14:40:03Z"
 }

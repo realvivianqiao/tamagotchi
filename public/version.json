@@ -1,6 +1,6 @@
 {
-  "version": "0.5.15",
+  "version": "0.5.16",
   "url": "/CoPet.zip",
-  "notes": "Visits glued + max 5s; online announce once per stretch.",
-  "publishedAt": "2026-10-16T03:20:03Z"
+  "notes": "Block phantom pads; visitors only for real friend actions.",
+  "publishedAt": "2026-10-16T03:22:20Z"
 }

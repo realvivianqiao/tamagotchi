@@ -6,16 +6,16 @@
     <description>CoPet updates</description>
     <language>en</language>
     <item>
-      <title>CoPet 0.5.15</title>
-      <pubDate>2026-10-16T03:20:03Z</pubDate>
-      <sparkle:version>26</sparkle:version>
-      <sparkle:shortVersionString>0.5.15</sparkle:shortVersionString>
+      <title>CoPet 0.5.16</title>
+      <pubDate>2026-10-16T03:22:20Z</pubDate>
+      <sparkle:version>27</sparkle:version>
+      <sparkle:shortVersionString>0.5.16</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-      <description><![CDATA[Visits glued + max 5s; online announce once per stretch.]]></description>
+      <description><![CDATA[Block phantom pads; visitors only for real friend actions.]]></description>
       <enclosure
         url="https://tamagotchi-udtz.onrender.com/CoPet.zip"
-        sparkle:edSignature="/lemIFk5I3x2fAAnAAYq6qV50GSC/gKXcGf5THten9SUvwV/Xm/LXQyTFL4i9z01fvu9zh20qwaXbw+jx9R5Bg=="
-        length="1709175"
+        sparkle:edSignature="4klWLsO78kZ7xIjFnAt7fDGethCF7LR1FevJ+7TIRXpDe0v22Ax89qf2TYVbxxmcTu82ZjiVJ7jiKKUDhzr1Cg=="
+        length="1712409"
         type="application/octet-stream" />
     </item>
   </channel>

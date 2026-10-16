@@ -912,9 +912,15 @@ struct FriendBond: Codable, Equatable {
         }
         saveFriends()
       }
-      // Actions from a friend land on *your* dog. Stats in the callback are ignored by Pet.
+      // Actions from a friend land on *your* dog. Stats-only syncs pass a nil action.
       let fromSpecies = json["species"] as? String
-      onSync?(f, h, action, from, code, fromSpecies)
+      let cleanAction: String? = {
+        guard let action else { return nil }
+        let a = action.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard ["feed", "play", "pet", "poke", "nap"].contains(a) else { return nil }
+        return a
+      }()
+      onSync?(f, h, cleanAction, from, code, fromSpecies)
       onFriendsChanged?()
 
     case "system":

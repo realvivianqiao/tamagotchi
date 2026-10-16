@@ -90,12 +90,14 @@ import AppKit
     window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
     window.contentView = view
     view.visitor = self
+    // Stay invisible until beginVisit snaps us beside the host — no “pad from the sky.”
+    window.alphaValue = 0
     window.orderFrontRegardless()
-    // Don't start the timer until beginVisit — avoids a frame of idle shove.
     if !ephemeral {
       if !quiet {
         say("hi from \(name) \(species.emoji)", seconds: 2.5)
       }
+      window.alphaValue = 1
       startTimer()
     }
   }
@@ -153,6 +155,7 @@ import AppKit
     startTimer()
     snapBesideHost()
     render()
+    window.alphaValue = 1 // only appear once we’re already beside the host
     let hx = hostX?() ?? x
     let hy = hostY?() ?? y
     startVisitGesture(hostX: hx, hostY: hy)

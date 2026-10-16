@@ -56,6 +56,10 @@ import AppKit
   private var announcedOnline: Set<String> = []
   /// When a friend last looked offline — clear announce after a real disconnect.
   private var offlineSince: [String: Date] = [:]
+  /// Dedupe — keepalive / double-sync must not spawn phantom pads.
+  private var lastVisitKey: String?
+  private var lastVisitAt: TimeInterval = 0
+  private static let visitActions: Set<String> = ["feed", "play", "pet", "poke", "nap"]
 
   private var grabStart = CGPoint.zero, lastMouse = CGPoint.zero, grabOffset = CGPoint.zero
   private var swallowRelease = false // double-click nap/wake — don't also pet()
@@ -167,12 +171,17 @@ import AppKit
     }
     // Friend sent an action at *you* — their pet visits your screen, then your pet reacts.
     Online.shared.onSync = { [weak self] _, _, action, from, code, fromSpecies in
-      guard let self, let action, !self.hidden else { return }
+      guard let self, !self.hidden else { return }
+      // Stats-only syncs must never spawn a visitor.
+      guard let action,
+            Self.visitActions.contains(action),
+            !from.isEmpty,
+            from != Online.shared.displayName
+      else { return }
       self.applyingRemote = true
-      let who = from.isEmpty ? "friend" : from
       let sp = Species.parse(fromSpecies ?? "")
       self.receiveFriendVisit(
-        action: action, fromName: who, code: code, species: sp)
+        action: action, fromName: from, code: code, species: sp)
       self.applyingRemote = false
       self.save()
       // Publish *your* new stats so their Friends list shows the real result.
@@ -1065,18 +1074,24 @@ import AppKit
   private func receiveFriendVisit(
     action: String, fromName: String, code: String?, species: Species
   ) {
+    guard Self.visitActions.contains(action) else { return }
     let bond =
       (code.flatMap { c in Online.shared.friends.first(where: { $0.code == c }) })
       ?? Online.shared.friends.first(where: { $0.partnerName == fromName })
     let visitCode = bond?.code ?? code ?? "visit"
     let visitName = bond?.partnerName.isEmpty == false ? bond!.partnerName : fromName
     let visitSpecies = bond?.petSpecies ?? species
+    // Same poke re-broadcast / keepalive echo → ignore.
+    let key = "\(visitCode)|\(action)|\(fromName)"
+    let now = ProcessInfo.processInfo.systemUptime
+    if lastVisitKey == key, now - lastVisitAt < 2.8 { return }
+    lastVisitKey = key
+    lastVisitAt = now
     logApp(
       "visit_received_\(action)", code: visitCode, targetName: visitName,
       extra: ["fromSpecies": visitSpecies.rawValue])
     let label = Self.visitLabel(
       actor: visitName, action: action, toward: "you", incoming: true)
-    // Host reacts when the visitor is beside them (onGestureStart) — not at spawn.
     presentVisit(
       code: visitCode,
       name: visitName,

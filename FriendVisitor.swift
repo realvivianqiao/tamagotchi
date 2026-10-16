@@ -36,7 +36,9 @@ import AppKit
   private var timer: Timer?
   /// Raised-paw / special gesture pose for a few frames.
   private var pawTicks = 0
-  private var showNameplate = true
+  private var showNameplate = false
+  /// Outgoing mirror: friend pad is silent chrome (label lives on the host only).
+  private var silentVisit = false
 
   // Visit choreography
   private var visitRole: VisitRole = .incomingActor
@@ -149,10 +151,17 @@ import AppKit
     playKickoffSent = false
     onVisitDone = onDone
     untilWoken = false
-    showNameplate = true
     let maxSec: TimeInterval = visitAction == "poke" ? 2.0 : visitMaxSeconds
     visitDeadline = Date().addingTimeInterval(maxSec)
-    say(label, seconds: visitAction == "poke" ? 0.55 : 0.9)
+    // Incoming: one bubble on the visitor (who + what). Outgoing: silent — host speaks.
+    showNameplate = false
+    silentVisit = (role == .outgoingTarget)
+    bubble = nil
+    bubbleTicks = 0
+    particles.removeAll()
+    if role == .incomingActor {
+      say(label, seconds: visitAction == "poke" ? 0.9 : 1.6)
+    }
     startTimer()
     snapBesideHost()
     render()
@@ -302,10 +311,7 @@ import AppKit
     case 1: // gesture — glued beside host the whole time
       snapBesideHost()
       runVisitGestureTick(hostX: hx, hostY: hy)
-      if visitTicks == Int(0.8 * fps) {
-        bubble = nil
-        bubbleTicks = 0
-      }
+      // Keep the single visit label up through the gesture (don't wipe it early).
       if visitTicks >= visitGestureDuration {
         visitPhase = 2
         visitTicks = 0
@@ -575,6 +581,7 @@ import AppKit
   }
 
   private func say(_ text: String, seconds: Double = 3.0) {
+    if silentVisit { return }
     bubble = text
     bubbleTicks = Int(seconds * fps)
   }
@@ -584,8 +591,11 @@ import AppKit
   }
 
   private func emit(_ text: String, count: Int = 1) {
+    // Outgoing mirror stays clean; incoming keeps light effects under the one label.
+    if silentVisit { return }
     let head = headPoint
-    for i in 0..<count {
+    let n = visitRole == .incomingActor ? min(count, 2) : count
+    for i in 0..<n {
       particles.append(
         Particle(
           text: text,

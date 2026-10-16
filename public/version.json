@@ -1,6 +1,6 @@
 {
-  "version": "0.5.30",
+  "version": "0.5.31",
   "url": "/CoPet.zip",
-  "notes": "Friend poke visits are a ~2s single boop, then gone.",
-  "publishedAt": "2026-10-16T04:11:01Z"
+  "notes": "One visit bubble only: on them when they act, on you when you act.",
+  "publishedAt": "2026-10-16T04:13:13Z"
 }

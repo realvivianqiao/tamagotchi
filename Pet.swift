@@ -1213,20 +1213,31 @@ import AppKit
     }
     v.onGestureStart = { [weak self] in
       guard let self else { return }
-      self.bubble = nil
-      self.bubbleTicks = 0
+      if role == .incomingActor {
+        // Label is only on the visitor — keep the host speechless.
+        self.bubble = nil
+        self.bubbleTicks = 0
+      }
       if role == .incomingActor, deferHostReaction {
         if action == "play" {
           self.happiness = min(100, self.happiness + 12)
           self.happyTicks = Int(2.5 * fps)
           self.hop()
         } else if action == "poke" {
-          // Quick boop reaction — not the long mad sprint.
           if self.untilWoken || self.activity == .sleep { self.wakeStickyNap() }
           self.happiness = max(0, self.happiness - 8)
           self.angryTicks = Int(0.9 * fps)
-          self.emit("💢", count: 2)
           self.hop()
+        } else if action == "pet" {
+          self.happiness = min(100, self.happiness + 6)
+          self.happyTicks = Int(1.2 * fps)
+          self.hop()
+        } else if action == "feed" {
+          self.fullness = min(100, self.fullness + 35)
+          self.happiness = min(100, self.happiness + 4)
+          self.set(.eat, seconds: 2)
+        } else if action == "nap" {
+          self.enterNap(sayLine: false)
         } else {
           self.playRemote(action)
         }
@@ -1238,8 +1249,6 @@ import AppKit
       guard let self else { return }
       self.hostingVisit = false
       self.visitStartedAt = 0
-      self.bubble = nil
-      self.bubbleTicks = 0
       // Always clear the guest pad after the visit — only your pet stays.
       if self.visitor?.code == code {
         self.visitor?.dismiss()
@@ -1255,10 +1264,14 @@ import AppKit
       self.visitStartedAt = 0
       self.visitor?.dismiss()
       self.visitor = nil
-      self.bubble = nil
-      self.bubbleTicks = 0
     }
-    say(label, seconds: action == "poke" ? 0.55 : 0.9)
+    // Outgoing: one line on *you*. Incoming: visitor already has the only bubble.
+    if role == .outgoingTarget {
+      say(label, seconds: action == "poke" ? 0.7 : 1.4)
+    } else {
+      bubble = nil
+      bubbleTicks = 0
+    }
   }
 
   private func performHostSideVisit(action: String) {
@@ -1306,11 +1319,11 @@ import AppKit
       }
     }
     return switch action {
-    case "feed": "you feed \(toward) 🍖"
-    case "play": "you play with \(toward) 🎾"
-    case "pet": "you pat \(toward) ❤️"
-    case "nap": "you tuck \(toward) in 💤"
-    case "poke": "you poke \(toward) 💢"
+    case "feed": "I feed \(toward) 🍖"
+    case "play": "I play with \(toward) 🎾"
+    case "pet": "I pat \(toward) ❤️"
+    case "nap": "I tuck \(toward) in 💤"
+    case "poke": "I poke \(toward) 💢"
     default: "→ \(toward)"
     }
   }

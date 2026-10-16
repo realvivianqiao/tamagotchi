@@ -1231,7 +1231,7 @@ import AppKit
     menu.addItem(item("My name…", #selector(onlineSetName)))
     menu.addItem(item("Check for updates…", #selector(checkForUpdates)))
     menu.addItem(.separator())
-    menu.addItem(item("Quit CoPet", #selector(quit)))
+    menu.addItem(item("Quit", #selector(quit)))
   }
 
   @objc private func checkForUpdates() {

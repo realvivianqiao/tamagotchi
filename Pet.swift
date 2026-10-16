@@ -18,6 +18,7 @@ import AppKit
   private var activityTicks = 0
   private var targetX: CGFloat?
   private var tick = 0, walkFrame = 0, happyTicks = 0, angryTicks = 0, blinkTicks = 0, bubbleTicks = 0
+  private var recentSays: [String] = []
   private var greeted = false
 
   private(set) var bubble: String?
@@ -247,23 +248,23 @@ import AppKit
       if species == .bird, activity == .walk {
         y = vf.minY + (walkFrame == 0 ? 0 : 3)
       }
-    case .run: // dog chase
-      x += dir * 3.0
-      if Int.random(in: 0..<70) == 0 { dir = -dir }
+    case .run: // dog chase — still peppy, not teleport
+      x += dir * 1.35
+      if Int.random(in: 0..<90) == 0 { dir = -dir }
       y = vf.minY
     case .fly: // bird soars between perch heights (slow drift)
-      x += dir * 1.6
+      x += dir * 0.85
       let ceiling = vf.minY + min(180, vf.height * 0.5)
       let perch = vf.minY + 55
-      y += CGFloat(sin(Double(tick) / 10.0)) * 1.2
-      if tick % 80 == 0 { y += CGFloat.random(in: -12...16) }
+      y += CGFloat(sin(Double(tick) / 14.0)) * 0.9
+      if tick % 100 == 0 { y += CGFloat.random(in: -10...12) }
       y = min(max(y, perch), ceiling)
-      if Int.random(in: 0..<80) == 0 { dir = -dir }
+      if Int.random(in: 0..<100) == 0 { dir = -dir }
     case .glide: // octopus drifts like it’s in water
-      x += dir * 0.5
-      y = vf.minY + 28 + CGFloat(sin(Double(tick) / 26.0)) * 10
-      if Int.random(in: 0..<140) == 0 { dir = -dir }
-      if tick % 70 == 0 { emit(["💧", "🫧"].randomElement()!) }
+      x += dir * 0.35
+      y = vf.minY + 28 + CGFloat(sin(Double(tick) / 30.0)) * 8
+      if Int.random(in: 0..<160) == 0 { dir = -dir }
+      if tick % 90 == 0 { emit(["💧", "🫧"].randomElement()!) }
     case .fall:
       vy -= species == .bird ? 0.55 : 0.9 // birds flutter-fall
       if species == .bird { vx *= 0.98 }
@@ -345,15 +346,16 @@ import AppKit
 
   private var walkSpeed: CGFloat {
     switch species {
-    case .bird: return 0.75 // gentle hop-walk
-    case .octopus: return 0.4 // awkward on “land”
-    case .dog: return fullness < 20 ? 0.7 : 1.15
+    case .bird: return 0.35 // gentle hop-walk
+    case .octopus: return 0.22 // awkward on “land”
+    case .dog: return fullness < 20 ? 0.32 : 0.48
     }
   }
 
   private func animate() {
     let flapFast = activity == .run || activity == .fly
-    if tick % (flapFast ? 5 : 10) == 0 { walkFrame ^= 1 }
+    // Slower leg cycle when walking so it matches the chill pace.
+    if tick % (flapFast ? 7 : 14) == 0 { walkFrame ^= 1 }
     happyTicks = max(0, happyTicks - 1)
     angryTicks = max(0, angryTicks - 1)
     if blinkTicks > 0 { blinkTicks -= 1 } else if Int.random(in: 0..<150) == 0 { blinkTicks = 4 }
@@ -525,7 +527,7 @@ import AppKit
         case .octopus: ["bloop", "…", "🫧", "ink later"]
         }
       }
-    say(lines.randomElement()!)
+    say(PetLines.pick(lines, recent: &recentSays), force: false)
   }
 
   // MARK: Rendering
@@ -582,9 +584,15 @@ import AppKit
     return CGPoint(x: spriteOrigin.x + mirrored * scale, y: spriteOrigin.y + (CGFloat(Canvas.h) - row) * scale)
   }
 
-  private func say(_ text: String, seconds: Double = 2.5) {
+  private func say(_ text: String, seconds: Double = 3.0, force: Bool = true) {
+    // Chatter passes force:false so idle lines don't stomp a gesture bubble mid-read.
+    if !force, bubble != nil, bubbleTicks > Int(1.0 * fps) { return }
     bubble = text
     bubbleTicks = Int(seconds * fps)
+  }
+
+  private func sayFresh(_ pool: [String], seconds: Double = 3.0) {
+    say(PetLines.pick(pool, recent: &recentSays), seconds: seconds, force: true)
   }
 
   private func emit(_ text: String, count: Int = 1) {
@@ -727,23 +735,23 @@ import AppKit
     happiness = min(100, happiness + 6)
     happyTicks = Int(2.5 * fps)
     if untilWoken || activity == .sleep {
-      say("mmh… 💤")
+      sayFresh(["mmh… 💤", "zzz… nice", "soft…", "dream pets…", "don't stop (asleep)", "cozy…", "mmh", "zzz ❤️", "keep going…", "sleepy pats"])
       pushOnline()
       return
     }
     switch species {
     case .dog:
       emit("❤️", count: 4)
-      say(["woof!", "best day!!", "more pets!!"].randomElement()!)
+      sayFresh(PetLines.pet(.dog))
       hop()
     case .bird:
       emit("✨", count: 3)
-      say(["tweet!", "fluff!!", "♪"].randomElement()!)
+      sayFresh(PetLines.pet(.bird))
       y = restFloor(in: screenFrame()) + 10
       set(.fly, seconds: 2.5) // happy flutter
     case .octopus:
       emit("🫧", count: 3)
-      say(["bloop~", "pat pat", "🫧❤️"].randomElement()!)
+      sayFresh(PetLines.pet(.octopus))
       set(.glide, seconds: 3)
     }
     pushOnline()
@@ -755,24 +763,17 @@ import AppKit
     fullness = min(100, fullness + 35)
     happiness = min(100, happiness + (wasFull ? 2 : 4))
     if untilWoken {
-      say(wasFull ? "nom… (still asleep)" : "nom nom… 💤")
+      sayFresh(PetLines.feedAsleep(species, secondBreakfast: wasFull))
       emit("🍖")
       pushOnline()
       return
     }
     set(.eat, seconds: 3.5)
-    if wasFull {
-      switch species {
-      case .dog: say("still hungry?? ok… 🍖"); emit("🍖")
-      case .bird: say("more seeds!!"); emit("seed", count: 2)
-      case .octopus: say("second snack 🦀"); emit("🦀")
-      }
-    } else {
-      switch species {
-      case .dog: say("nom nom 🍖"); emit("🍖")
-      case .bird: say("peck peck!"); emit("seed", count: 2)
-      case .octopus: say("nom bloop 🦀"); emit("🦀")
-      }
+    sayFresh(PetLines.feed(species, secondBreakfast: wasFull))
+    switch species {
+    case .dog: emit("🍖")
+    case .bird: emit("seed", count: 2)
+    case .octopus: emit("🦀")
     }
     pushOnline()
   }
@@ -781,7 +782,7 @@ import AppKit
     happiness = min(100, happiness + 12)
     fullness = max(0, fullness - 3)
     if untilWoken {
-      say("…later. sleeping")
+      sayFresh(PetLines.playAsleep(species))
       pushOnline()
       return
     }
@@ -795,16 +796,16 @@ import AppKit
     switch species {
     case .dog:
       set(.run, seconds: seconds)
-      say("ZOOMIES!! 🎾")
+      sayFresh(PetLines.play(.dog))
       emit("💨")
     case .bird:
       y = vf.minY + CGFloat.random(in: 80...140)
       set(.fly, seconds: seconds)
-      say("sky!! 🪶")
+      sayFresh(PetLines.play(.bird))
     case .octopus:
       y = restFloor(in: vf) + 10
       set(.glide, seconds: seconds)
-      say("whoosh 🌊")
+      sayFresh(PetLines.play(.octopus))
       emit("🫧", count: 2)
     }
   }
@@ -820,17 +821,17 @@ import AppKit
     case .dog:
       set(.run, seconds: 3)
       emit("💢", count: 3)
-      say(["hey!!", "grrr!", "was that needed"].randomElement()!)
+      sayFresh(PetLines.poke(.dog))
     case .bird:
       y = vf.minY + 100
       set(.fly, seconds: 3.5)
       emit("💢", count: 2)
-      say(["SQUAWK", "mean!!"].randomElement()!)
+      sayFresh(PetLines.poke(.bird))
     case .octopus:
       y = restFloor(in: vf)
       set(.glide, seconds: 3.5)
       emit("🖤", count: 4) // ink cloud
-      say(["INK!!", "blorp— bye"].randomElement()!)
+      sayFresh(PetLines.poke(.octopus))
     }
   }
 

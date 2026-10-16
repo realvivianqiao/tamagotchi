@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 APP=build/CoPet.app
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 MIN=13.0
-SRCS="main.swift Sprites.swift PetView.swift Pet.swift Online.swift FriendVisitor.swift PetPicker.swift"
+SRCS="main.swift Sprites.swift PetLines.swift PetView.swift Pet.swift Online.swift FriendVisitor.swift PetPicker.swift"
 swiftc -O -swift-version 5 -target "arm64-apple-macosx${MIN}" \
   $SRCS -o /tmp/CoPet-arm64
 swiftc -O -swift-version 5 -target "x86_64-apple-macosx${MIN}" \

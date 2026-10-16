@@ -15,6 +15,7 @@ import AppKit
   private var activityTicks = 0
   private var tick = 0, walkFrame = 0, happyTicks = 0, angryTicks = 0, blinkTicks = 0, bubbleTicks = 0
   private var untilWoken = false
+  private var recentSays: [String] = []
   private var bubble: String?
   private var particles: [Particle] = []
   private var sprite: Sprite
@@ -77,26 +78,26 @@ import AppKit
     case "feed":
       set(.eat, seconds: 3)
       emit("🍖")
-      say("nom! 🍖")
+      sayFresh(PetLines.feed(species, secondBreakfast: false))
     case "play":
       signaturePlay(seconds: 5)
     case "pet":
       happyTicks = Int(2.5 * fps)
       angryTicks = 0
       emit("❤️", count: 3)
-      say("hehe~ ❤️")
+      sayFresh(PetLines.pet(species))
       if activity != .sleep { hop() }
     case "nap":
       untilWoken = true
       set(.sleep, seconds: 9_999)
-      say("zzz…")
+      sayFresh(["zzz…", "nap time", "night night", "💤", "tucked in", "soft…", "dreaming…", "zzz", "cozy", "sleep mode"])
     case "poke":
       untilWoken = false
       happyTicks = 0
       angryTicks = Int(5 * fps)
-      signaturePlay(seconds: 2.5)
+      signaturePlayAngry(seconds: 2.5)
       emit("💢", count: 3)
-      say(["hey!!", "grrr!", "rude!!"].randomElement()!)
+      sayFresh(PetLines.poke(species))
     default:
       break
     }
@@ -107,15 +108,28 @@ import AppKit
     switch species {
     case .dog:
       set(.run, seconds: seconds)
-      say("zoomies!! 🎾")
+      sayFresh(PetLines.play(.dog))
     case .bird:
       y = vf.minY + 60
       set(.fly, seconds: seconds)
-      say("flyyy!")
+      sayFresh(PetLines.play(.bird))
     case .octopus:
       y = vf.minY + 24
       set(.glide, seconds: seconds)
-      say("bloop~")
+      sayFresh(PetLines.play(.octopus))
+    }
+  }
+
+  private func signaturePlayAngry(seconds: Double) {
+    let vf = NSScreen.main!.visibleFrame
+    switch species {
+    case .dog: set(.run, seconds: seconds)
+    case .bird:
+      y = vf.minY + 60
+      set(.fly, seconds: seconds)
+    case .octopus:
+      y = vf.minY + 24
+      set(.glide, seconds: seconds)
     }
   }
 
@@ -146,18 +160,18 @@ import AppKit
     let vf0 = NSScreen.main!.visibleFrame
     switch activity {
     case .walk:
-      x += dir * 0.9
+      x += dir * 0.4
       y = vf0.minY
     case .run:
-      x += dir * 2.4
-      if Int.random(in: 0..<60) == 0 { dir = -dir }
+      x += dir * 1.2
+      if Int.random(in: 0..<90) == 0 { dir = -dir }
       y = vf0.minY
     case .fly:
-      x += dir * 1.5
-      y = max(vf0.minY + 40, min(vf0.minY + 140, y + CGFloat(sin(Double(tick) / 12)) * 0.9))
+      x += dir * 0.8
+      y = max(vf0.minY + 40, min(vf0.minY + 140, y + CGFloat(sin(Double(tick) / 16)) * 0.7))
     case .glide:
-      x += dir * 0.55
-      y = vf0.minY + 18 + CGFloat(sin(Double(tick) / 22)) * 8
+      x += dir * 0.35
+      y = vf0.minY + 18 + CGFloat(sin(Double(tick) / 28)) * 7
     case .sit, .eat, .sleep, .held:
       if activity != .sleep { y = vf0.minY }
     case .fall:
@@ -201,7 +215,7 @@ import AppKit
       }
     }
 
-    if tick % (activity == .run || activity == .fly ? 5 : 10) == 0 { walkFrame ^= 1 }
+    if tick % (activity == .run || activity == .fly ? 7 : 14) == 0 { walkFrame ^= 1 }
     for i in particles.indices {
       if particles[i].vel == .zero {
         particles[i].life = particles[i].maxLife
@@ -226,9 +240,13 @@ import AppKit
     y += 12
   }
 
-  private func say(_ text: String, seconds: Double = 2.2) {
+  private func say(_ text: String, seconds: Double = 3.0) {
     bubble = text
     bubbleTicks = Int(seconds * fps)
+  }
+
+  private func sayFresh(_ pool: [String], seconds: Double = 3.0) {
+    say(PetLines.pick(pool, recent: &recentSays), seconds: seconds)
   }
 
   private func emit(_ text: String, count: Int = 1) {

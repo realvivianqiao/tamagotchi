@@ -6,16 +6,16 @@
     <description>CoPet updates</description>
     <language>en</language>
     <item>
-      <title>CoPet 0.5.1</title>
-      <pubDate>2026-10-16T02:14:15Z</pubDate>
-      <sparkle:version>12</sparkle:version>
-      <sparkle:shortVersionString>0.5.1</sparkle:shortVersionString>
+      <title>CoPet 0.5.2</title>
+      <pubDate>2026-10-16T02:16:25Z</pubDate>
+      <sparkle:version>13</sparkle:version>
+      <sparkle:shortVersionString>0.5.2</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-      <description><![CDATA[Gesture menu uses emojis (poke/feed/play/pet/nap).]]></description>
+      <description><![CDATA[Pets move on one axis per bout (no zigzag) so they are easier to grab.]]></description>
       <enclosure
         url="https://tamagotchi-udtz.onrender.com/CoPet.zip"
-        sparkle:edSignature="WZE6NrZUTIFKUaa16/h3w09B6XaxGrh2Lhh6O0NWw9/7BUD3kAfDIkEV1eN6zOPw/wQ5fsyIFnpHbgmQEjfABQ=="
-        length="1642447"
+        sparkle:edSignature="xQKomAXYj+Gw3kRBr10eWf1vq3qnQsrgZ8zoBry4bZvl4sTNy7wYKZTHI8kBVqUwWn3C4CKkw8nPPPnO4j7DBw=="
+        length="1645436"
         type="application/octet-stream" />
     </item>
   </channel>

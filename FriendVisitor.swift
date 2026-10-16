@@ -13,6 +13,9 @@ import AppKit
   private var dir: CGFloat = -1
   private var activity: Pet.Activity = .sit
   private var activityTicks = 0
+  /// Match host pet: one axis per bout so visitors are grab-able.
+  private var wanderHorizontal = true
+  private var wanderLock: CGFloat?
   private var tick = 0, walkFrame = 0, happyTicks = 0, angryTicks = 0, blinkTicks = 0, bubbleTicks = 0
   private var untilWoken = false
   private var recentSays: [String] = []
@@ -160,18 +163,39 @@ import AppKit
     let vf0 = NSScreen.main!.visibleFrame
     switch activity {
     case .walk:
-      x += dir * 0.4
+      x += dir * 0.35
       y = vf0.minY
     case .run:
-      x += dir * 1.2
-      if Int.random(in: 0..<90) == 0 { dir = -dir }
+      x += dir * 0.9
+      if Int.random(in: 0..<120) == 0 { dir = -dir }
       y = vf0.minY
     case .fly:
-      x += dir * 0.8
-      y = max(vf0.minY + 40, min(vf0.minY + 140, y + CGFloat(sin(Double(tick) / 16)) * 0.7))
+      let perch = vf0.minY + 40
+      let ceiling = vf0.minY + 140
+      if wanderHorizontal {
+        x += dir * 0.5
+        if let lock = wanderLock { y = lock }
+        if Int.random(in: 0..<140) == 0 { dir = -dir }
+      } else {
+        if let lock = wanderLock { x = lock }
+        y += dir * 0.35
+        if y <= perch { y = perch; dir = 1 }
+        if y >= ceiling { y = ceiling; dir = -1 }
+      }
+      y = max(perch, min(ceiling, y))
     case .glide:
-      x += dir * 0.35
-      y = vf0.minY + 18 + CGFloat(sin(Double(tick) / 28)) * 7
+      if wanderHorizontal {
+        x += dir * 0.28
+        if let lock = wanderLock { y = lock }
+        if Int.random(in: 0..<180) == 0 { dir = -dir }
+      } else {
+        let low = vf0.minY + 12
+        let high = vf0.minY + 70
+        if let lock = wanderLock { x = lock }
+        y += dir * 0.22
+        if y <= low { y = low; dir = 1 }
+        if y >= high { y = high; dir = -1 }
+      }
     case .sit, .eat, .sleep, .held:
       if activity != .sleep { y = vf0.minY }
     case .fall:
@@ -207,10 +231,26 @@ import AppKit
           untilWoken = false
           set(.sit, seconds: 2)
         } else if Int.random(in: 0..<3) == 0 {
-          set(.walk, seconds: Double.random(in: 3...6))
+          // Prefer ground walks (horizontal); rare aerial bout for bird/octopus visitors.
+          if species == .bird, Int.random(in: 0..<3) == 0 {
+            set(.fly, seconds: Double.random(in: 4...8))
+            wanderHorizontal = Int.random(in: 0..<5) != 0
+            y = vf.minY + CGFloat.random(in: 60...110)
+            wanderLock = wanderHorizontal ? y : x
+          } else if species == .octopus, Int.random(in: 0..<3) == 0 {
+            set(.glide, seconds: Double.random(in: 4...8))
+            wanderHorizontal = Int.random(in: 0..<4) != 0
+            y = vf.minY + CGFloat.random(in: 18...40)
+            wanderLock = wanderHorizontal ? y : x
+          } else {
+            set(.walk, seconds: Double.random(in: 3...6))
+            wanderHorizontal = true
+            wanderLock = nil
+          }
           if Bool.random() { dir = -dir }
         } else {
           set(.sit, seconds: Double.random(in: 2...5))
+          wanderLock = nil
         }
       }
     }

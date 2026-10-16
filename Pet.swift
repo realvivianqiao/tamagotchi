@@ -4,6 +4,8 @@ import AppKit
 
 @MainActor final class Pet: NSObject, NSMenuDelegate {
   enum Activity { case walk, run, sit, sleep, eat, held, fall, fly, glide }
+  /// One activity bout moves on a single axis so the pet is easier to grab.
+  private enum WanderAxis { case horizontal, vertical }
 
   let menu = NSMenu()
   private let window: NSPanel
@@ -16,6 +18,9 @@ import AppKit
   private(set) var dir: CGFloat = 1
   private var activity = Activity.fall
   private var activityTicks = 0
+  private var wanderAxis: WanderAxis = .horizontal
+  /// Locked Y (or X) for the current axis-locked bout.
+  private var wanderLock: CGFloat?
   private var targetX: CGFloat?
   private var tick = 0, walkFrame = 0, happyTicks = 0, angryTicks = 0, blinkTicks = 0, bubbleTicks = 0
   private var recentSays: [String] = []
@@ -252,6 +257,7 @@ import AppKit
       vx = 0
       vy = 0
       targetX = nil
+      wanderLock = nil
       y = sleepFloor(in: screenFrame())
       pinStaticSleepZzz()
       updateParticles()
@@ -277,27 +283,44 @@ import AppKit
           set(.sit, seconds: 3)
         }
       }
+      // Walk is always horizontal — no diagonal zigzag.
       x += dir * walkSpeed
-      // Bird hops gently on the ground; octopus prefers not to walk.
-      if species == .bird, activity == .walk {
+      if species == .bird {
         y = vf.minY + (walkFrame == 0 ? 0 : 3)
       }
-    case .run: // dog chase — still peppy, not teleport
-      x += dir * 1.35
-      if Int.random(in: 0..<90) == 0 { dir = -dir }
+    case .run: // dog chase — horizontal only, slightly slower to grab
+      x += dir * 0.95
+      if Int.random(in: 0..<120) == 0 { dir = -dir }
       y = vf.minY
-    case .fly: // bird soars between perch heights (slow drift)
-      x += dir * 0.85
+    case .fly: // one axis per bout — easier to catch than zigzag
       let ceiling = vf.minY + min(180, vf.height * 0.5)
       let perch = vf.minY + 55
-      y += CGFloat(sin(Double(tick) / 14.0)) * 0.9
-      if tick % 100 == 0 { y += CGFloat.random(in: -10...12) }
+      switch wanderAxis {
+      case .horizontal:
+        x += dir * 0.55
+        if let lock = wanderLock { y = lock }
+        if Int.random(in: 0..<140) == 0 { dir = -dir }
+      case .vertical:
+        if let lock = wanderLock { x = lock }
+        y += dir * 0.4
+        if y <= perch { y = perch; dir = 1 }
+        if y >= ceiling { y = ceiling; dir = -1 }
+      }
       y = min(max(y, perch), ceiling)
-      if Int.random(in: 0..<100) == 0 { dir = -dir }
-    case .glide: // octopus drifts like it’s in water
-      x += dir * 0.35
-      y = vf.minY + 28 + CGFloat(sin(Double(tick) / 30.0)) * 8
-      if Int.random(in: 0..<160) == 0 { dir = -dir }
+    case .glide: // octopus — horizontal or vertical drift, never both
+      switch wanderAxis {
+      case .horizontal:
+        x += dir * 0.28
+        if let lock = wanderLock { y = lock }
+        if Int.random(in: 0..<180) == 0 { dir = -dir }
+      case .vertical:
+        let low = vf.minY + 12
+        let high = vf.minY + 70
+        if let lock = wanderLock { x = lock }
+        y += dir * 0.22
+        if y <= low { y = low; dir = 1 }
+        if y >= high { y = high; dir = -1 }
+      }
       if tick % 90 == 0 { emit(["💧", "🫧"].randomElement()!) }
     case .fall:
       vy -= species == .bird ? 0.55 : 0.9 // birds flutter-fall
@@ -380,9 +403,9 @@ import AppKit
 
   private var walkSpeed: CGFloat {
     switch species {
-    case .bird: return 0.35 // gentle hop-walk
-    case .octopus: return 0.22 // awkward on “land”
-    case .dog: return fullness < 20 ? 0.32 : 0.48
+    case .bird: return 0.28 // gentle hop-walk
+    case .octopus: return 0.18 // awkward on “land”
+    case .dog: return fullness < 20 ? 0.26 : 0.38
     }
   }
 
@@ -437,15 +460,25 @@ import AppKit
     let vf = screenFrame()
     switch next {
     case .fly:
+      // Mostly side-to-side; occasional pure up/down climb.
+      wanderAxis = Int.random(in: 0..<5) == 0 ? .vertical : .horizontal
       y = vf.minY + CGFloat.random(in: 70...130)
+      wanderLock = wanderAxis == .horizontal ? y : x
       say(["chirp!", "↑ tweet", "wind~"].randomElement()!)
     case .glide:
-      y = restFloor(in: vf)
+      wanderAxis = Int.random(in: 0..<4) == 0 ? .vertical : .horizontal
+      y = restFloor(in: vf) + (wanderAxis == .horizontal ? CGFloat.random(in: 0...20) : 0)
+      wanderLock = wanderAxis == .horizontal ? y : x
       if Bool.random() { say(["…", "bloop", "🫧"].randomElement()!) }
-    case .run where species == .dog:
-      if Bool.random() { say(["zoom!", "bark!", "🎾"].randomElement()!) }
+    case .walk, .run:
+      wanderAxis = .horizontal
+      wanderLock = nil
+      if case .run = next, species == .dog, Bool.random() {
+        say(["zoom!", "bark!", "🎾"].randomElement()!)
+      }
     default:
-      break
+      wanderAxis = .horizontal
+      wanderLock = nil
     }
   }
 

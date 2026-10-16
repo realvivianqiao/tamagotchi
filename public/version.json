@@ -1,6 +1,6 @@
 {
-  "version": "0.5.1",
+  "version": "0.5.2",
   "url": "/CoPet.zip",
-  "notes": "Gesture menu uses emojis (poke/feed/play/pet/nap).",
-  "publishedAt": "2026-10-16T02:14:15Z"
+  "notes": "Pets move on one axis per bout (no zigzag) so they are easier to grab.",
+  "publishedAt": "2026-10-16T02:16:25Z"
 }

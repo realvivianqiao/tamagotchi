@@ -33,6 +33,15 @@ enum Species: String, CaseIterable, Codable, Hashable {
     }
   }
 
+  /// Basic default display name when you pick this pet.
+  var defaultName: String {
+    switch self {
+    case .dog: "Buddy"
+    case .octopus: "Ink"
+    case .bird: "Pip"
+    }
+  }
+
   var emoji: String {
     switch self {
     case .dog: "🐶"

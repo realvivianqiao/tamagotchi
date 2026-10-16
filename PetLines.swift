@@ -16,7 +16,7 @@ enum PetLines {
   static func pet(_ species: Species) -> [String] {
     switch species {
     case .dog:
-      [
+      return [
         "woof!", "best day!!", "more pets!!", "hehe~", "ear scritches!!",
         "good human ❤️", "belly rubs??", "aww~", "yesss", "pat pat!",
         "i'm melting", "soft…", "❤️❤️", "tail go brrr", "favorite!!",
@@ -25,7 +25,7 @@ enum PetLines {
         "flop~", "sigh (happy)", "you're the best", "🥺❤️", "head empty only pets",
       ]
     case .bird:
-      [
+      return [
         "tweet!", "fluff!!", "♪", "chirp chirp", "preen me!",
         "soft feathers", "♡", "up!!", "sing~", "coo",
         "berry vibes", "happy hop", "wing hug", "✨", "don't ruffle… wait do",
@@ -34,7 +34,7 @@ enum PetLines {
         "puff!!", "melodic~", "best human", "feather fluff ❤️", "chirp forever",
       ]
     case .octopus:
-      [
+      return [
         "bloop~", "pat pat", "🫧❤️", "squish!", "tentacle hug",
         "warm current", "ink? no… love", "drift happy", "soft squeeze", "♡ bloop",
         "more arms = more hugs", "gurgle~", "cozy", "float float", "squeeze!",
@@ -167,7 +167,7 @@ enum PetLines {
   static func play(_ species: Species) -> [String] {
     switch species {
     case .dog:
-      [
+      return [
         "ZOOMIES!! 🎾", "ball!!", "chase me!!", "park energy!!", "go go go!",
         "fetch??", "sprint!!", "woof WOOF", "can't catch me", "zoom zoom",
         "best game!!", "run run run", "🎾!!", "play bow!!", "zoomies activated",
@@ -176,7 +176,7 @@ enum PetLines {
         "catch this!", "zoomies 2", "happy sprint", "game on!!", "💥🎾",
       ]
     case .bird:
-      [
+      return [
         "sky!! 🪶", "flyyy!", "up up!!", "wind!!", "soar~",
         "cloud hop", "tweet flight", "air dance", "higher!!", "glide!!",
         "feather rocket", "sky party", "flight mode", "whoosh 🪶", "loop!!",
@@ -185,7 +185,7 @@ enum PetLines {
         "free as a… me", "sky!! again", "wing day", "fly with me", "✨🪶",
       ]
     case .octopus:
-      [
+      return [
         "whoosh 🌊", "current ride!!", "drift speed", "bubble jet!", "swim swim",
         "tide zoom", "ink later, play now", "wave!!", "float race", "bloop zoom",
         "reef dash", "tentacle turbo", "🌊!!", "splash play", "current go brrr",
@@ -197,7 +197,7 @@ enum PetLines {
   }
 
   static func playAsleep(_ species: Species) -> [String] {
-    [
+    return [
       "…later. sleeping", "zzz — play tomorrow", "dreaming of games…", "nap first",
       "busy being horizontal", "ask again after roost", "sleep mode on", "zzz no fetch",
       "dream zoomies only", "not now… pillow", "later later", "eyes closed = closed",
@@ -214,7 +214,7 @@ enum PetLines {
   static func poke(_ species: Species) -> [String] {
     switch species {
     case .dog:
-      [
+      return [
         "hey!!", "grrr!", "was that needed", "rude!!", "ow— hey!",
         "excuse me?!", "don't poke!!", "grumble", "side eye 💢", "i saw that",
         "why!!", "mean human", "bark!!", "personal space!!", "grrr…",
@@ -223,7 +223,7 @@ enum PetLines {
         "boundary!!", "leave my nose", "grrr bark", "dramatic gasp", "i'm offended",
       ]
     case .bird:
-      [
+      return [
         "SQUAWK", "mean!!", "hey!!", "feathers ruffled!!", "rude chirp",
         "don't poke the bird", "tweet MAD", "personal wing space", "ow!!", "side eye",
         "why would you", "SQUAWK 2", "angry hop", "beak warning", "not cute",
@@ -232,7 +232,7 @@ enum PetLines {
         "ruffled!!", "squawk forever", "i'm small AND mad", "peck warning", "unbelievable!!",
       ]
     case .octopus:
-      [
+      return [
         "INK!!", "blorp— bye", "hey!!", "rude current", "don't poke!!",
         "ink cloud!!", "grumpy blob", "tentacle slap?", "why!!", "bloop MAD",
         "personal space (all 8)", "ink ink ink", "mean tide", "i saw that", "💢🫧",

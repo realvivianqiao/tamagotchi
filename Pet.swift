@@ -43,6 +43,7 @@ import AppKit
   private var visitor: FriendVisitor?
 
   private var grabStart = CGPoint.zero, lastMouse = CGPoint.zero, grabOffset = CGPoint.zero
+  private var swallowRelease = false // double-click nap/wake — don't also pet()
   private var lastDragTime: TimeInterval = 0
   private var throwVelocity = CGVector.zero
   private var dragged = false
@@ -71,13 +72,14 @@ import AppKit
     menu.delegate = self
     wireOnline()
 
-    // First download / fresh install: pick Dog, Black Cat, Octopus, Cow, or Bird.
+    // First download / fresh install: pick Buddy, Ink, or Pip.
     if !PetPicker.hasChosen {
       let pick = PetPicker.runModal()
       species = pick
+      Online.shared.displayName = pick.defaultName
       sprites.removeAll()
       statusItem.button?.title = pick.emoji
-      say("hi! i'm a \(pick.title) \(pick.emoji)", seconds: 3.5)
+      say("hi! i'm \(pick.defaultName)", seconds: 3.5)
     }
 
     window.orderFrontRegardless()
@@ -640,6 +642,14 @@ import AppKit
   // MARK: Mouse
 
   func grab() {
+    // Double-click → nap / wake (same as menu).
+    if NSApp.currentEvent?.clickCount == 2 {
+      swallowRelease = true
+      dragged = false
+      toggleNap()
+      return
+    }
+    swallowRelease = false
     let m = NSEvent.mouseLocation
     grabStart = m
     lastMouse = m
@@ -649,6 +659,7 @@ import AppKit
   }
 
   func drag() {
+    if swallowRelease { return }
     let m = NSEvent.mouseLocation
     if !dragged {
       guard hypot(m.x - grabStart.x, m.y - grabStart.y) > 3 else { return }
@@ -674,6 +685,10 @@ import AppKit
   }
 
   func release() {
+    if swallowRelease {
+      swallowRelease = false
+      return
+    }
     guard dragged else { return pet() }
     // Dropped at a screen edge → tuck in for a nap.
     if edgeNapIfNeeded() { return }
@@ -879,11 +894,16 @@ import AppKit
     guard let raw = sender.representedObject as? String,
           let next = Species(rawValue: raw)
     else { return }
+    let oldDefault = species.defaultName
     species = next
     Online.shared.mySpecies = next
+    // If they were still using the old default name, switch to the new pet's name.
+    if Online.shared.displayName == oldDefault || Online.shared.displayName == defaultPetName {
+      Online.shared.displayName = next.defaultName
+    }
     sprites.removeAll()
     refreshStatusItem()
-    say("i'm a \(next.title)! \(next.emoji)", seconds: 2)
+    say("hi! i'm \(Online.shared.displayName)", seconds: 2)
     pushOnline() // tell friends your new look
     render()
   }
@@ -1108,7 +1128,7 @@ import AppKit
       let speciesMenu = NSMenu()
       for sp in Species.allCases {
         let row = NSMenuItem(
-          title: "\(sp.emoji) \(sp.title)",
+          title: sp.defaultName,
           action: #selector(chooseSpecies(_:)),
           keyEquivalent: "")
         row.target = self

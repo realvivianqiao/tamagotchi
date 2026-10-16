@@ -93,12 +93,12 @@ import AppKit
     spriteView.frame = NSRect(x: (frame.width - 76) / 2, y: 48, width: 76, height: 76)
     addSubview(spriteView)
 
-    label.stringValue = "\(species.emoji)\n\(species.title)"
-    label.font = .systemFont(ofSize: 11, weight: .semibold)
+    label.stringValue = species.defaultName
+    label.font = .systemFont(ofSize: 12, weight: .semibold)
     label.textColor = NSColor(srgbRed: 0.29, green: 0.17, blue: 0.07, alpha: 1)
     label.alignment = .center
-    label.maximumNumberOfLines = 2
-    label.frame = NSRect(x: 4, y: 8, width: frame.width - 8, height: 36)
+    label.maximumNumberOfLines = 1
+    label.frame = NSRect(x: 4, y: 12, width: frame.width - 8, height: 22)
     addSubview(label)
 
     let click = NSClickGestureRecognizer(target: self, action: #selector(clicked))

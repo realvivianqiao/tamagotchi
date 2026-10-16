@@ -1,6 +1,6 @@
 {
-  "version": "0.5.13",
+  "version": "0.5.14",
   "url": "/CoPet.zip",
-  "notes": "Clear Remove bond button on each friend.",
-  "publishedAt": "2026-10-16T03:11:23Z"
+  "notes": "Visits spawn glued beside your pad; host stays put.",
+  "publishedAt": "2026-10-16T03:17:36Z"
 }

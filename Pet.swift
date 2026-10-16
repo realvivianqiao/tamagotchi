@@ -50,6 +50,8 @@ import AppKit
   private var untilWoken = false
   /// Friend's pet visiting your desktop (their species + reactions).
   private var visitor: FriendVisitor?
+  /// While a visit is playing, freeze wander so you stay face-to-face.
+  private var hostingVisit = false
 
   private var grabStart = CGPoint.zero, lastMouse = CGPoint.zero, grabOffset = CGPoint.zero
   private var swallowRelease = false // double-click nap/wake — don't also pet()
@@ -301,6 +303,18 @@ import AppKit
   }
 
   private func move(in vf: CGRect) {
+    // Don't stroll away mid-visit — guest is glued to you.
+    if hostingVisit || visitor?.isVisiting == true {
+      if activity == .walk || activity == .run || activity == .fly || activity == .glide {
+        // Hold still (hops / sit reactions still ok via performHostSideVisit).
+        if activity == .fly || activity == .glide {
+          // keep height, zero wander
+        } else {
+          y = restFloor(in: vf)
+        }
+        return
+      }
+    }
     switch activity {
     case .walk:
       if let t = targetX {
@@ -473,6 +487,11 @@ import AppKit
 
     activityTicks -= 1
     guard activityTicks <= 0, activity != .held, activity != .fall else { return }
+    // Don't pick a new wander while a friend is visiting.
+    if hostingVisit || visitor?.isVisiting == true {
+      set(.sit, seconds: 1)
+      return
+    }
     // Only non-sticky (idle) sleeps can auto-wake.
     if activity == .sleep {
       set(.sit, seconds: 2)
@@ -1060,6 +1079,11 @@ import AppKit
     // Never keep a lingering visitor — rebuild for each interaction.
     visitor?.dismiss()
     visitor = nil
+    hostingVisit = true
+    // Plant yourself so the guest can spawn on your hip.
+    let vf = screenFrame()
+    y = restFloor(in: vf)
+    set(.sit, seconds: 5)
     let v = FriendVisitor(
       code: code, name: name, species: species, near: x,
       ephemeral: true, quiet: true)
@@ -1067,7 +1091,11 @@ import AppKit
     v.hostY = { [weak self] in self?.y ?? 0 }
     visitor = v
     v.onPlayWithHost = { [weak self] in
-      self?.startSignatureMove(seconds: 2.8)
+      // In-place play — don't sprint across the screen away from the guest.
+      guard let self else { return }
+      self.happyTicks = Int(2.5 * fps)
+      self.hop()
+      self.emit("🎾", count: 2)
     }
     v.onGestureStart = { [weak self] in
       guard let self else { return }
@@ -1076,6 +1104,8 @@ import AppKit
       if role == .incomingActor, deferHostReaction {
         if action == "play" {
           self.happiness = min(100, self.happiness + 12)
+          self.happyTicks = Int(2.5 * fps)
+          self.hop()
         } else {
           self.playRemote(action)
         }
@@ -1085,6 +1115,7 @@ import AppKit
     }
     v.beginVisit(action: action, label: label, role: role) { [weak self] in
       guard let self else { return }
+      self.hostingVisit = false
       self.bubble = nil
       self.bubbleTicks = 0
       // Always clear the guest pad after the visit — only your pet stays.
@@ -1093,7 +1124,7 @@ import AppKit
         self.visitor = nil
       }
     }
-    say(label, seconds: 1.1)
+    say(label, seconds: 1.0)
   }
 
   private func performHostSideVisit(action: String) {

@@ -6,16 +6,16 @@
     <description>CoPet updates</description>
     <language>en</language>
     <item>
-      <title>CoPet 0.5.13</title>
-      <pubDate>2026-10-16T03:11:23Z</pubDate>
-      <sparkle:version>24</sparkle:version>
-      <sparkle:shortVersionString>0.5.13</sparkle:shortVersionString>
+      <title>CoPet 0.5.14</title>
+      <pubDate>2026-10-16T03:17:36Z</pubDate>
+      <sparkle:version>25</sparkle:version>
+      <sparkle:shortVersionString>0.5.14</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-      <description><![CDATA[Clear Remove bond button on each friend.]]></description>
+      <description><![CDATA[Visits spawn glued beside your pad; host stays put.]]></description>
       <enclosure
         url="https://tamagotchi-udtz.onrender.com/CoPet.zip"
-        sparkle:edSignature="iK9cBRy7gon/BcYk+SCEND4SZWB2bANxr/AnBF6nKaMAclklVCMY5qzY/CRPP9YKAisjPwuu8UChOF58sc72BQ=="
-        length="1697106"
+        sparkle:edSignature="FnJmx/mdCN00yew7SD0ZQR19Wx640yg66fqGU/k73lCntihLhviGrsnekez4sSzrr86qVDoaA95cwU6QQ+4yBw=="
+        length="1697354"
         type="application/octet-stream" />
     </item>
   </channel>

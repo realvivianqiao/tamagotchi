@@ -87,7 +87,7 @@ enum PetLines {
     }
     switch species {
     case .dog:
-      [
+      return [
         "nom nom 🍖", "crunch!!", "best meal", "thank u!!", "bowl empty already?",
         "mmm meat", "good food day", "woof (full)", "treat!!", "chef human!!",
         "nom…", "happy tummy", "bone?? alsook", "slurp", "dinner!!",
@@ -96,7 +96,7 @@ enum PetLines {
         "belly +1", "crunch crunch", "so good", "meal of champions", "♡ food",
       ]
     case .bird:
-      [
+      return [
         "peck peck!", "SEED!", "berry!!", "crunch seed", "beak happy",
         "yum chirp", "feeder full ♡", "tweet (nom)", "seed acquired", "peckish no more",
         "crumb dance", "tiny feast", "nom seed", "happy crop", "more? maybe",
@@ -105,7 +105,7 @@ enum PetLines {
         "feather fuel", "peck peck peck", "delicious!", "seed goblin wins", "♡ crumbs",
       ]
     case .octopus:
-      [
+      return [
         "nom bloop 🦀", "crab!!", "snack tide", "gurgle yum", "bloop feast",
         "tentacle nom", "🦀 delicious", "bubble dinner", "reef snack", "ink? nah food",
         "squish + snack", "yum current", "arms full of crab", "bloop thanks", "nom…",
@@ -131,7 +131,7 @@ enum PetLines {
     }
     switch species {
     case .dog:
-      [
+      return [
         "nom nom… 💤", "dream meat…", "zzz… yum", "sleep-nom", "mmh food",
         "dreaming of bowls", "zzz 🍖", "soft crunch…", "nap snack", "eyes shut nom",
         "pillow dinner", "zzz feast", "half bark, half snore", "dream treat",
@@ -141,7 +141,7 @@ enum PetLines {
         "sleepy nom", "zzz bowl", "dream crunch", "still sleeping, still eating",
       ]
     case .bird:
-      [
+      return [
         "peck… 💤", "dream seeds…", "zzz chirp nom", "roost snack", "sleepy peck",
         "dream feeder", "zzz SEED", "nest nom", "soft peck…", "asleep tweet-eat",
         "dream berry", "zzz yum", "roost buffet", "half fluff half food", "sleepy beak",
@@ -150,7 +150,7 @@ enum PetLines {
         "asleep peeping", "zzz seed zzz", "dream crop full", "nest nomming", "zzz… yum",
       ]
     case .octopus:
-      [
+      return [
         "bloop… 💤", "dream crab…", "zzz 🦀", "sand snack", "sleep bloop nom",
         "dream tide feast", "zzz yum", "bubble dinner (asleep)", "soft nom…",
         "ink dreams + crab", "zzz snack", "horizontal blob feast", "dream reef",

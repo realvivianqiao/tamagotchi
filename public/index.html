@@ -9,35 +9,31 @@
   <link rel="apple-touch-icon" href="/app-icon.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=DM+Sans:opsz,wght@9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --ink: #3d2914;
-      --cream: #fff8ef;
-      --butter: #ffd56a;
-      --blush: #ff8fab;
-      --sky: #ffe0c2;
-      --sky2: #c8ebe3;
-      --soft: #6a5340;
+      --ink: #3a2412;
+      --soft: #6b5340;
+      --cream: #faf8f5;
+      --butter: #ffd45a;
+      --line: #d9d4cc;
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; min-height: 100%; }
     body {
       color: var(--ink);
-      font-family: "DM Sans", system-ui, sans-serif;
+      font-family: Nunito, system-ui, sans-serif;
       background: var(--cream);
     }
 
     .hero {
-      position: relative;
       min-height: 100vh;
       min-height: 100dvh;
       display: grid;
       grid-template-rows: 1fr auto;
+      position: relative;
       overflow: hidden;
-      background:
-        radial-gradient(ellipse 90% 70% at 70% 20%, #fff0d8 0%, transparent 55%),
-        linear-gradient(165deg, var(--sky) 0%, #ffe9d4 42%, var(--sky2) 100%);
+      background: #f5f4f1;
     }
 
     .hero-art {
@@ -45,93 +41,71 @@
       inset: 0;
       width: 100%;
       height: 100%;
-      object-fit: cover;
-      object-position: center 62%;
+      object-fit: contain;
+      object-position: center 55%;
       image-rendering: pixelated;
       image-rendering: crisp-edges;
       z-index: 0;
-      pointer-events: none;
-    }
-
-    .hero-fade {
-      position: absolute;
-      inset: auto 0 0;
-      height: 42%;
-      z-index: 1;
-      background: linear-gradient(to top, rgba(61, 41, 20, 0.55), transparent);
-      pointer-events: none;
+      background: #f5f4f1;
     }
 
     .hero-copy {
       position: relative;
       z-index: 2;
-      padding: clamp(1.5rem, 4vw, 3rem);
-      padding-bottom: clamp(2rem, 5vw, 3.25rem);
-      max-width: 36rem;
-      color: var(--cream);
+      padding: clamp(1.25rem, 3.5vw, 2.5rem);
+      padding-bottom: clamp(1.75rem, 4vw, 2.75rem);
+      text-align: center;
+      background: linear-gradient(to top, rgba(245, 244, 241, 0.97) 55%, transparent);
     }
 
     .brand {
-      font-family: "Baloo 2", "DM Sans", sans-serif;
       font-weight: 800;
-      font-size: clamp(3.4rem, 12vw, 5.6rem);
-      line-height: 0.92;
-      margin: 0 0 0.45rem;
-      color: #fff;
-      letter-spacing: 0.01em;
-      text-shadow: 0 3px 0 rgba(61, 41, 20, 0.35);
+      font-size: clamp(2.6rem, 8vw, 4rem);
+      line-height: 1;
+      margin: 0 0 0.4rem;
+      letter-spacing: -0.02em;
     }
 
     .tagline {
-      margin: 0 0 1.25rem;
-      font-size: clamp(1.05rem, 2.5vw, 1.2rem);
-      font-weight: 600;
+      margin: 0 auto 1.15rem;
+      max-width: 26rem;
+      font-size: clamp(1rem, 2.2vw, 1.15rem);
+      font-weight: 700;
+      color: var(--soft);
       line-height: 1.4;
-      max-width: 22rem;
-      color: rgba(255, 248, 239, 0.95);
     }
 
     .cta {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.4rem;
-      font-family: "Baloo 2", "DM Sans", sans-serif;
-      font-weight: 700;
-      font-size: 1.15rem;
+      display: inline-block;
+      font-weight: 800;
+      font-size: 1.05rem;
       text-decoration: none;
       color: var(--ink);
       background: var(--butter);
       border: 3px solid var(--ink);
       border-radius: 999px;
-      padding: 0.8rem 1.45rem 0.75rem;
-      box-shadow: 0 4px 0 var(--ink);
+      padding: 0.75rem 1.4rem 0.7rem;
+      box-shadow: 0 3px 0 var(--ink);
       transition: transform 0.12s ease, box-shadow 0.12s ease;
     }
-    .cta:hover {
-      transform: translateY(2px);
-      box-shadow: 0 2px 0 var(--ink);
-    }
-    .cta:active {
-      transform: translateY(4px);
-      box-shadow: 0 0 0 var(--ink);
-    }
+    .cta:hover { transform: translateY(1px); box-shadow: 0 2px 0 var(--ink); }
+    .cta:active { transform: translateY(3px); box-shadow: 0 0 0 var(--ink); }
 
     .play {
-      background: var(--cream);
-      border-top: 3px solid var(--ink);
-      padding: clamp(2.25rem, 5vw, 3.75rem) clamp(1.25rem, 4vw, 2.5rem) 3.25rem;
+      border-top: 2px solid var(--line);
+      padding: clamp(2rem, 5vw, 3.25rem) clamp(1.25rem, 4vw, 2rem) 3rem;
+      background: #fff;
     }
-    .play-inner { max-width: 36rem; margin: 0 auto; }
+    .play-inner { max-width: 34rem; margin: 0 auto; }
     .play h2 {
-      font-family: "Baloo 2", sans-serif;
-      font-weight: 700;
-      font-size: clamp(1.45rem, 3.2vw, 1.8rem);
-      margin: 0 0 0.35rem;
+      font-weight: 800;
+      font-size: 1.35rem;
+      margin: 0 0 0.3rem;
     }
     .play > .play-inner > p {
-      margin: 0 0 1.35rem;
+      margin: 0 0 1.2rem;
       color: var(--soft);
-      font-weight: 600;
+      font-weight: 700;
     }
     ol.steps {
       list-style: none;
@@ -139,64 +113,57 @@
       padding: 0;
       counter-reset: step;
       display: grid;
-      gap: 0.75rem;
+      gap: 0.65rem;
     }
     ol.steps li {
       counter-increment: step;
       position: relative;
-      padding: 0.9rem 1rem 0.9rem 3rem;
-      background: #fff;
-      border: 2.5px solid var(--ink);
-      border-radius: 1rem;
-      font-weight: 600;
+      padding: 0.8rem 0.9rem 0.8rem 2.75rem;
+      border: 2px solid var(--line);
+      border-radius: 0.85rem;
+      font-weight: 700;
       color: var(--soft);
-      line-height: 1.4;
-      box-shadow: 3px 3px 0 rgba(61, 41, 20, 0.1);
+      line-height: 1.35;
+      background: var(--cream);
     }
     ol.steps li::before {
       content: counter(step);
       position: absolute;
-      left: 0.75rem;
+      left: 0.7rem;
       top: 50%;
       transform: translateY(-50%);
-      width: 1.65rem;
-      height: 1.65rem;
+      width: 1.45rem;
+      height: 1.45rem;
       border-radius: 50%;
-      background: var(--blush);
-      color: #fff;
-      font-family: "Baloo 2", sans-serif;
-      font-weight: 700;
-      font-size: 0.95rem;
+      background: var(--butter);
+      border: 2px solid var(--ink);
+      font-size: 0.85rem;
+      font-weight: 800;
       display: grid;
       place-items: center;
-      border: 2px solid var(--ink);
+      color: var(--ink);
     }
     ol.steps li strong { color: var(--ink); }
     .fix {
-      margin-top: 1.5rem;
-      font-size: 0.88rem;
+      margin-top: 1.35rem;
+      font-size: 0.85rem;
       color: var(--soft);
-      line-height: 1.5;
-      font-weight: 600;
+      font-weight: 700;
+      line-height: 1.45;
     }
     .fix code {
       font-family: ui-monospace, Menlo, monospace;
-      font-size: 0.78rem;
-      background: var(--butter);
-      padding: 0.12rem 0.4rem;
-      border-radius: 0.35rem;
+      font-size: 0.76rem;
+      background: #fff3c4;
+      padding: 0.1rem 0.35rem;
+      border-radius: 0.3rem;
       border: 1.5px solid var(--ink);
-    }
-
-    @media (max-width: 560px) {
-      .hero-art { object-position: center 70%; }
     }
   </style>
 </head>
 <body>
   <section class="hero" aria-label="Mochi">
-    <img class="hero-art" src="/pets.png" width="1200" height="720" alt="Pixel dog, octopus, and bird on a grassy desk" />
-    <div class="hero-fade" aria-hidden="true"></div>
+    <img class="hero-art" src="/pets.png" width="1400" height="900" alt="Pixel dog saying zoomies on a Mac dock, with octopus and bird friends" />
     <div class="hero-copy">
       <h1 class="brand">Mochi</h1>
       <p class="tagline">Tiny pets for your Mac. Invite a friend — feed and pet sync live.</p>

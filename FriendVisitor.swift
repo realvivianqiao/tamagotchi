@@ -107,7 +107,7 @@ import AppKit
     switch species {
     case .dog:
       set(.run, seconds: seconds)
-      say("zoomies!!")
+      say("zoomies!! 🎾")
     case .bird:
       y = vf.minY + 60
       set(.fly, seconds: seconds)

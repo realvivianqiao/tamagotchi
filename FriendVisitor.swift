@@ -37,8 +37,9 @@ import AppKit
   /// Raised-paw / special gesture pose for a few frames.
   private var pawTicks = 0
   private var showNameplate = false
-  /// Outgoing mirror: friend pad is silent chrome (label lives on the host only).
-  private var silentVisit = false
+  /// Outgoing mirror: no speech bubble / nameplate (label lives on the host only).
+  /// Animations + food particles still run — the friend pad is the one reacting.
+  private var silentSpeech = false
 
   // Visit choreography
   private var visitRole: VisitRole = .incomingActor
@@ -49,13 +50,16 @@ import AppKit
   private var onVisitDone: (() -> Void)?
   private var playKickoffSent = false
   /// Which side of the host we stand on for this visit (locked so we don't flip-flop).
-  private var visitSide: CGFloat = 1
+  /// Host should face this direction (`dir = visitSide`) while giving.
+  private(set) var visitSide: CGFloat = 1
   /// Absolute deadline — visit never lingers past this.
   private var visitDeadline: Date?
   private let visitMaxSeconds: TimeInterval = 4.5
 
   var hostX: (() -> CGFloat)?
   var hostY: (() -> CGFloat)?
+  /// Species of the pad we’re next to (so offered food matches the eater).
+  var hostSpecies: (() -> Species)?
   /// Host should start their play animation when the visit reaches the play beat.
   var onPlayWithHost: (() -> Void)?
   /// Fired when the visitor is close and the gesture starts (host should react *now*).
@@ -153,9 +157,9 @@ import AppKit
     untilWoken = false
     let maxSec: TimeInterval = visitAction == "poke" ? 2.0 : visitMaxSeconds
     visitDeadline = Date().addingTimeInterval(maxSec)
-    // Incoming: one bubble on the visitor (who + what). Outgoing: silent — host speaks.
+    // Incoming: one bubble on the visitor (who + what). Outgoing: speech on host only.
     showNameplate = false
-    silentVisit = (role == .outgoingTarget)
+    silentSpeech = (role == .outgoingTarget)
     bubble = nil
     bubbleTicks = 0
     particles.removeAll()
@@ -350,28 +354,50 @@ import AppKit
   private func startVisitGesture(hostX hx: CGFloat, hostY hy: CGFloat) {
     // Host reacts when we’re actually close — not while we’re spawning.
     onGestureStart?()
+    // Incoming actor = we do the action to the host.
+    // Outgoing target = we *receive* the host’s action (eat when fed, etc.).
+    let receiving = visitRole == .outgoingTarget
     switch visitAction {
     case "pet":
       happyTicks = Int(2.5 * fps)
       angryTicks = 0
-      switch species {
-      case .dog:
-        set(.sit, seconds: 2.6)
-        pawTicks = Int(2.0 * fps)
-        emit("❤️", count: 6)
-        hop()
-      case .bird:
-        set(.fly, seconds: 2.6)
-        y = hy + 40
-        emit("✨", count: 5)
-        emit("❤️", count: 3)
-      case .octopus:
-        set(.glide, seconds: 2.6)
-        emit("🫧", count: 5)
-        emit("❤️", count: 3)
+      if receiving {
+        // Happily receiving pets.
+        switch species {
+        case .dog:
+          set(.sit, seconds: 2.4)
+          pawTicks = Int(1.6 * fps)
+          hop()
+          emit("❤️", count: 3)
+        case .bird:
+          set(.fly, seconds: 2.4)
+          y = hy + 36
+          emit("❤️", count: 2)
+          emit("✨", count: 2)
+        case .octopus:
+          set(.glide, seconds: 2.4)
+          emit("❤️", count: 2)
+          emit("🫧", count: 2)
+        }
+      } else {
+        // Giving pets to the host.
+        switch species {
+        case .dog:
+          set(.sit, seconds: 2.4)
+          pawTicks = Int(2.0 * fps)
+          emit("❤️", count: 3)
+          hop()
+        case .bird:
+          set(.fly, seconds: 2.4)
+          y = hy + 40
+          emit("❤️", count: 2)
+        case .octopus:
+          set(.glide, seconds: 2.4)
+          emit("🫧", count: 2)
+          emit("❤️", count: 2)
+        }
       }
     case "poke":
-      // One boop — in and out in ~2s total.
       angryTicks = Int(0.9 * fps)
       happyTicks = 0
       emit("💢", count: 2)
@@ -382,11 +408,18 @@ import AppKit
       case .octopus: set(.glide, seconds: 0.7)
       }
     case "feed":
-      set(.eat, seconds: 2.4)
-      switch species {
-      case .dog: emit("🍖", count: 3)
-      case .bird: emit("seed", count: 4)
-      case .octopus: emit("🦀", count: 3)
+      if receiving {
+        // Friend’s pet eats — food matches *this* species (dog→🍖, bird→seed, …).
+        set(.eat, seconds: 2.4)
+        happyTicks = Int(2.4 * fps)
+        emit(Self.foodEmoji(species), count: 3)
+      } else {
+        // Offer food meant for the *host* — they play the eat reaction.
+        let forHost = hostSpecies?() ?? .dog
+        happyTicks = Int(2.0 * fps)
+        set(.sit, seconds: 2.2)
+        hop()
+        emit(Self.foodEmoji(forHost), count: 3)
       }
     case "play":
       signaturePlay(seconds: 2.8)
@@ -396,11 +429,24 @@ import AppKit
         onPlayWithHost?()
       }
     case "nap":
-      untilWoken = true
-      set(.sleep, seconds: 2.2)
-      emit("💤", count: 2)
+      if receiving {
+        untilWoken = true
+        set(.sleep, seconds: 2.2)
+        emit("💤", count: 2)
+      } else {
+        set(.sit, seconds: 2.0)
+        emit("💤", count: 2)
+      }
     default:
       set(.sit, seconds: 2)
+    }
+  }
+
+  static func foodEmoji(_ species: Species) -> String {
+    switch species {
+    case .dog: return "🍖"
+    case .bird: return "seed"
+    case .octopus: return "🦀"
     }
   }
 
@@ -448,11 +494,8 @@ import AppKit
       break
     case "feed":
       if visitTicks % 10 == 0 {
-        switch species {
-        case .dog: emit("🍖")
-        case .bird: emit("seed")
-        case .octopus: emit("🦀")
-        }
+        let eater = visitRole == .outgoingTarget ? species : (hostSpecies?() ?? species)
+        emit(Self.foodEmoji(eater))
       }
     default:
       break
@@ -581,7 +624,7 @@ import AppKit
   }
 
   private func say(_ text: String, seconds: Double = 3.0) {
-    if silentVisit { return }
+    if silentSpeech { return }
     bubble = text
     bubbleTicks = Int(seconds * fps)
   }
@@ -591,10 +634,8 @@ import AppKit
   }
 
   private func emit(_ text: String, count: Int = 1) {
-    // Outgoing mirror stays clean; incoming keeps light effects under the one label.
-    if silentVisit { return }
     let head = headPoint
-    let n = visitRole == .incomingActor ? min(count, 2) : count
+    let n = min(count, 3)
     for i in 0..<n {
       particles.append(
         Particle(

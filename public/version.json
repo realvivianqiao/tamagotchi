@@ -1,6 +1,6 @@
 {
-  "version": "0.5.31",
+  "version": "0.5.32",
   "url": "/CoPet.zip",
-  "notes": "One visit bubble only: on them when they act, on you when you act.",
-  "publishedAt": "2026-10-16T04:13:13Z"
+  "notes": "Friend feed/pet use giver vs eater roles; food matches their species. Dance stays self-only.",
+  "publishedAt": "2026-10-16T04:15:51Z"
 }

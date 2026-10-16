@@ -1203,6 +1203,7 @@ import AppKit
       ephemeral: true, quiet: true)
     v.hostX = { [weak self] in self?.x ?? 0 }
     v.hostY = { [weak self] in self?.y ?? 0 }
+    v.hostSpecies = { [weak self] in self?.species ?? .dog }
     visitor = v
     v.onPlayWithHost = { [weak self] in
       // In-place play — don't sprint across the screen away from the guest.
@@ -1219,6 +1220,7 @@ import AppKit
         self.bubbleTicks = 0
       }
       if role == .incomingActor, deferHostReaction {
+        // We *receive* their action — eat when fed, etc. (our species).
         if action == "play" {
           self.happiness = min(100, self.happiness + 12)
           self.happyTicks = Int(2.5 * fps)
@@ -1235,14 +1237,17 @@ import AppKit
         } else if action == "feed" {
           self.fullness = min(100, self.fullness + 35)
           self.happiness = min(100, self.happiness + 4)
-          self.set(.eat, seconds: 2)
+          self.set(.eat, seconds: 2.4)
+          self.happyTicks = Int(2.4 * fps)
+          self.emit(FriendVisitor.foodEmoji(self.species), count: 3)
         } else if action == "nap" {
           self.enterNap(sayLine: false)
         } else {
           self.playRemote(action)
         }
       } else if role == .outgoingTarget {
-        self.performHostSideVisit(action: action)
+        // We *give* the action — friend species is `species` on this visit.
+        self.performHostSideVisit(action: action, friendSpecies: species)
       }
     }
     v.beginVisit(action: action, label: label, role: role) { [weak self] in
@@ -1274,31 +1279,32 @@ import AppKit
     }
   }
 
-  private func performHostSideVisit(action: String) {
+  /// You are the actor on an outgoing visit — offer / pet / poke *them*.
+  /// Food and reactions use `friendSpecies` (the pad you’re acting on).
+  private func performHostSideVisit(action: String, friendSpecies: Species) {
+    // Face the visitor.
+    if let side = visitor?.visitSide { dir = side }
     switch action {
     case "pet":
       happyTicks = Int(2.2 * fps)
-      switch species {
-      case .dog:
-        emit("❤️", count: 5)
-        hop()
-      case .bird:
-        emit("✨", count: 4)
-        set(.fly, seconds: 2.2)
-      case .octopus:
-        emit("🫧", count: 4)
-        set(.glide, seconds: 2.2)
-      }
-    case "poke":
-      emit("💢", count: 3)
+      emit("❤️", count: 3)
       hop()
+      set(.sit, seconds: 2.2)
+    case "poke":
+      emit("💢", count: 2)
+      hop()
+      set(.sit, seconds: 0.8)
     case "feed":
-      set(.eat, seconds: 2.2)
-      emit(species == .bird ? "seed" : (species == .octopus ? "🦀" : "🍖"))
+      // Extend *their* food to them — you don’t eat it.
+      happyTicks = Int(2.2 * fps)
+      set(.sit, seconds: 2.2)
+      hop()
+      emit(FriendVisitor.foodEmoji(friendSpecies), count: 3)
     case "play":
       break // kicked off together via visitor onPlayWithHost
     case "nap":
       emit("💤", count: 2)
+      set(.sit, seconds: 2.0)
     default:
       break
     }

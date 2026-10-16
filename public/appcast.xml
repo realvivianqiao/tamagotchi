@@ -6,16 +6,16 @@
     <description>CoPet updates</description>
     <language>en</language>
     <item>
-      <title>CoPet 0.5.31</title>
-      <pubDate>2026-10-16T04:13:13Z</pubDate>
-      <sparkle:version>42</sparkle:version>
-      <sparkle:shortVersionString>0.5.31</sparkle:shortVersionString>
+      <title>CoPet 0.5.32</title>
+      <pubDate>2026-10-16T04:15:51Z</pubDate>
+      <sparkle:version>43</sparkle:version>
+      <sparkle:shortVersionString>0.5.32</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-      <description><![CDATA[One visit bubble only: on them when they act, on you when you act.]]></description>
+      <description><![CDATA[Friend feed/pet use giver vs eater roles; food matches their species. Dance stays self-only.]]></description>
       <enclosure
         url="https://tamagotchi-udtz.onrender.com/CoPet.zip"
-        sparkle:edSignature="ORs7PfMRALJq3piVjzOVrxJqyHx+z2vClfjWs+hxUMjmbZ7LA8c7GtAT1eJIQ/P1x63jDpec0pzsvpt6Yz2NAg=="
-        length="1782808"
+        sparkle:edSignature="/irjjwm6hRsSNvx0HI9fSF42ezP9DWsQEn8yyHSPVT2HBtaR65NGxMYQA/HFjH6R2P29junEyFNtnCKrg2uaCA=="
+        length="1786054"
         type="application/octet-stream" />
     </item>
   </channel>

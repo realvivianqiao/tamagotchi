@@ -1678,6 +1678,13 @@ import AppKit
       return
     }
     if dance.enabled {
+      // Asleep with dance still on → treat the click as “resume,” not stop.
+      if untilWoken || activity == .sleep {
+        _ = wakeIfNapping()
+        say("back to the music 🎵", seconds: 2)
+        logApp("spotify_dance_resume")
+        return
+      }
       dance.setEnabled(false)
       dancingToSpotify = false
       lastBeatPulse = 0
@@ -1685,14 +1692,12 @@ import AppKit
       logApp("spotify_dance_off")
       return
     }
-    if untilWoken || activity == .sleep {
-      say("wake me up first 💤", seconds: 2.2)
-      return
-    }
+    // Same as Feed / Play / Pet — dance ends a nap; no separate Wake up needed.
+    _ = wakeIfNapping()
     let a = NSAlert()
     a.messageText = "Dance to Spotify?"
     a.informativeText =
-      "Same as Feed or Play — but for music. Mochi listens only to the Spotify desktop app and dances on the beat. Speakers or Bluetooth headphones both work. Allow audio capture (and Spotify Automation) if macOS asks. Nap pauses the dance until you wake them."
+      "Same as Feed or Play — but for music. Mochi listens only to the Spotify desktop app and dances on the beat. Speakers or Bluetooth headphones both work. Allow audio capture (and Spotify Automation) if macOS asks."
     a.addButton(withTitle: "Dance")
     a.addButton(withTitle: "Cancel")
     NSApp.activate(ignoringOtherApps: true)

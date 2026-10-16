@@ -1002,7 +1002,12 @@ import AppKit
   private func sendToFriend(action: String, code: String, name: String) {
     Online.shared.setActive(code: code)
     logApp("menu_friend_\(action)", code: code, targetName: name)
+    // Local visit always plays here; sync reaches them only if both are in the bond room (🟢).
     Online.shared.sync(fullness: fullness, happiness: happiness, action: action, toCode: code)
+    let friendOnline = Online.shared.friends.first(where: { $0.code == code })?.online == true
+    if !friendOnline {
+      say("\(name) looks offline ⚪️ — open CoPet on both Macs", seconds: 2.5)
+    }
     let friendSpecies =
       Online.shared.friends.first(where: { $0.code == code })?.petSpecies ?? .dog
     let label = Self.visitLabel(actor: petName, action: action, toward: name, incoming: false)

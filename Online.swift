@@ -235,6 +235,7 @@ struct FriendBond: Codable, Equatable {
   private var session: URLSession!
   private var task: URLSessionWebSocketTask?
   private var receiveLoop = false
+  private var keepAlive: Timer?
 
   override init() {
     super.init()
@@ -488,13 +489,29 @@ struct FriendBond: Codable, Equatable {
 
   /// Broadcast your pet's stats (and optional action aimed at the friend in this room).
   /// Does not overwrite that friend's stored stats — those update only when *they* sync.
+  ///
+  /// Online/offline = both pads WebSocket-attached to this bond’s room.
+  /// Friend actions only reach the other laptop if *both* are attached.
   func sync(fullness: Double, happiness: Double, action: String? = nil, toCode: String? = nil) {
     let code = toCode ?? activeCode
-    guard let code, connected else { return }
+    guard let code else { return }
     if let action, let i = friends.firstIndex(where: { $0.code == code }) {
       friends[i].lastActivity = "you: \(action)"
       saveFriends()
     }
+    // Actions must land — reconnect + re-attach if the socket dropped.
+    if action != nil {
+      Task { @MainActor in
+        await ensureAttached(to: code)
+        self.sendSync(fullness: fullness, happiness: happiness, action: action, code: code)
+      }
+      return
+    }
+    guard connected else { return }
+    sendSync(fullness: fullness, happiness: happiness, action: nil, code: code)
+  }
+
+  private func sendSync(fullness: Double, happiness: Double, action: String?, code: String) {
     var msg: [String: Any] = [
       "type": "sync", "code": code,
       "fullness": fullness, "happiness": happiness,
@@ -505,7 +522,21 @@ struct FriendBond: Codable, Equatable {
     send(msg)
   }
 
+  /// Make sure this pad is in the bond room so presence + actions work both ways.
+  @MainActor
+  func ensureAttached(to code: String) async {
+    ensureSocket()
+    if !connected {
+      send(["type": "hello", "deviceId": deviceId, "name": displayName])
+      try? await Task.sleep(nanoseconds: 350_000_000)
+    }
+    attachNow(code: code)
+    try? await Task.sleep(nanoseconds: 250_000_000)
+  }
+
   func disconnect() {
+    keepAlive?.invalidate()
+    keepAlive = nil
     task?.cancel(with: .goingAway, reason: nil)
     task = nil
     connected = false
@@ -539,6 +570,7 @@ struct FriendBond: Codable, Equatable {
       if shareCode != nil || !friends.isEmpty {
         shareMyCode(fullness: 80, happiness: 80)
       }
+      startKeepAlive()
       guard !friends.isEmpty else {
         onStatus?("pad ready")
         return
@@ -546,7 +578,26 @@ struct FriendBond: Codable, Equatable {
       if activeCode == nil { activeCode = friends.first?.code }
       onFriendsChanged?()
       onPresence?()
-      for f in friends { attach(code: f.code) }
+      for f in friends where !f.waiting { await ensureAttached(to: f.code) }
+    }
+  }
+
+  /// Stay in bond rooms so 🟢 / friend actions keep working both ways.
+  private func startKeepAlive() {
+    keepAlive?.invalidate()
+    keepAlive = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
+      Task { @MainActor in
+        guard let self else { return }
+        self.ensureSocket()
+        self.send(["type": "ping"])
+        self.send(["type": "hello", "deviceId": self.deviceId, "name": self.displayName])
+        for f in self.friends where !f.waiting {
+          self.attachNow(code: f.code)
+        }
+      }
+    }
+    if let keepAlive {
+      RunLoop.main.add(keepAlive, forMode: .common)
     }
   }
 
@@ -752,19 +803,23 @@ struct FriendBond: Codable, Equatable {
     ensureSocket()
     Task { @MainActor in
       try? await Task.sleep(nanoseconds: 300_000_000)
-      var msg: [String: Any] = [
-        "type": "attach", "code": code, "name": displayName,
-        "deviceId": deviceId,
-        "species": mySpecies.rawValue,
-        "fullness": friends.first(where: { $0.code == code })?.fullness ?? 80,
-        "happiness": friends.first(where: { $0.code == code })?.happiness ?? 80,
-      ]
-      // Partner name lets the server rehydrate a wiped bond directory from client memory.
-      if let f = friends.first(where: { $0.code == code }), !f.waiting, !f.partnerName.isEmpty {
-        msg["partnerName"] = f.partnerName
-      }
-      send(msg)
+      attachNow(code: code)
     }
+  }
+
+  private func attachNow(code: String) {
+    var msg: [String: Any] = [
+      "type": "attach", "code": code, "name": displayName,
+      "deviceId": deviceId,
+      "species": mySpecies.rawValue,
+      "fullness": friends.first(where: { $0.code == code })?.fullness ?? lastFullness,
+      "happiness": friends.first(where: { $0.code == code })?.happiness ?? lastHappiness,
+    ]
+    // Partner name lets the server rehydrate a wiped bond directory from client memory.
+    if let f = friends.first(where: { $0.code == code }), !f.waiting, !f.partnerName.isEmpty {
+      msg["partnerName"] = f.partnerName
+    }
+    send(msg)
   }
 
   private func send(_ msg: [String: Any]) {

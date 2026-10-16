@@ -1,6 +1,6 @@
 {
-  "version": "0.5.35",
+  "version": "0.5.36",
   "url": "/CoPet.zip",
-  "notes": "Pad card in the menu \u2014 meters + Friends can visit switch instead of Status: Offline.",
-  "publishedAt": "2026-10-16T04:28:26Z"
+  "notes": "Pad presence as a tiny dot by the name; birds sit on the floor; idle nap then wake and ask for pets/food.",
+  "publishedAt": "2026-10-16T04:38:36Z"
 }

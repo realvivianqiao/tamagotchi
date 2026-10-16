@@ -79,6 +79,18 @@ import AppKit
   /// True from mouseDown through mouseUp so hit-testing can’t drop the drag mid-air.
   private var grabbing = false
   private var visitStartedAt: TimeInterval = 0
+  /// Last time the human poked / fed / dragged / opened the menu, etc.
+  private var lastUserTouch = ProcessInfo.processInfo.systemUptime
+  /// Auto-nap from boredom (can self-wake and beg). User Nap stays sticky.
+  private var idleNap = false
+  private var idleAsleepAt: TimeInterval = 0
+  /// Just woke from an idle nap — chatty until touched or they doze off again.
+  private var seekingAttention = false
+  private static let idleNapAfter: TimeInterval = 5 * 60
+  /// How long an idle nap lasts before they wake up to bother you.
+  private static let idleNapSleepFor: TimeInterval = 2.5 * 60
+  /// Ignored after waking → back to sleep.
+  private static let attentionIdleAfter: TimeInterval = 90
 
   override init() {
     let screen = NSScreen.main!.visibleFrame
@@ -328,7 +340,10 @@ import AppKit
     decay()
     guard !hidden else { return }
 
-    // Sticky nap: freeze activity forever until Wake up (survives screen / space switches).
+    maybeIdleNap()
+    maybeWakeFromIdleNap()
+
+    // Sticky nap: freeze until Wake up — unless it's an idle nap that just self-woke.
     if untilWoken {
       activity = .sleep
       vx = 0
@@ -471,10 +486,9 @@ import AppKit
     pinToHabitat(in: vf)
   }
 
-  /// Where this species likes to rest (birds perch, octopus hovers).
+  /// Where this species likes to rest. Birds sit on the real floor (flight uses perch/ceiling in `.fly`).
   private func restFloor(in vf: CGRect) -> CGFloat {
     switch species {
-    case .bird: return vf.minY + 72
     case .octopus: return vf.minY + 20
     default: return vf.minY
     }
@@ -482,7 +496,6 @@ import AppKit
 
   private func sleepFloor(in vf: CGRect) -> CGFloat {
     switch species {
-    case .bird: return vf.minY + 90 // roost up high
     case .octopus: return vf.minY + 8 // settle near sand
     default: return vf.minY
     }
@@ -571,6 +584,69 @@ import AppKit
     if dancingToSpotify { return true }
     return lastBeatPulse > 0
       && ProcessInfo.processInfo.systemUptime - lastBeatPulse < 5
+  }
+
+  private func noteUserTouch() {
+    lastUserTouch = ProcessInfo.processInfo.systemUptime
+    seekingAttention = false
+  }
+
+  /// No human contact → tuck in. Shorter fuse while they're already begging for attention.
+  private func maybeIdleNap() {
+    guard !untilWoken, activity != .sleep, activity != .held, !grabbing else { return }
+    // Mid-song dance counts as company — nap when the music (or the human) goes quiet.
+    if isDanceMode { return }
+    let limit = seekingAttention ? Self.attentionIdleAfter : Self.idleNapAfter
+    guard ProcessInfo.processInfo.systemUptime - lastUserTouch >= limit else { return }
+    logApp(seekingAttention ? "idle_nap_ignored" : "idle_nap")
+    enterNap(sayLine: true, idle: true)
+  }
+
+  /// Idle naps self-wake after a bit and ask for pets / food / play.
+  private func maybeWakeFromIdleNap() {
+    guard untilWoken, idleNap else { return }
+    guard ProcessInfo.processInfo.systemUptime - idleAsleepAt >= Self.idleNapSleepFor else { return }
+    wakeForAttention()
+  }
+
+  private func wakeForAttention() {
+    untilWoken = false
+    idleNap = false
+    seekingAttention = true
+    persistNap()
+    // Fresh attention window — not a user touch.
+    lastUserTouch = ProcessInfo.processInfo.systemUptime
+    let vf = screenFrame()
+    y = restFloor(in: vf)
+    activity = .sit
+    activityTicks = Int(2.5 * fps)
+    vx = 0
+    vy = 0
+    logApp("idle_wake_attention")
+    begForAttention(force: true)
+    switch species {
+    case .dog: hop()
+    case .bird:
+      y = restFloor(in: vf) + 8
+      set(.fly, seconds: 1.8)
+    case .octopus:
+      set(.glide, seconds: 2)
+      emit("🫧")
+    }
+    pushOnline()
+    render()
+  }
+
+  private func begForAttention(force: Bool) {
+    let pool: [String] =
+      if fullness < 40 {
+        PetLines.hungry(species)
+      } else if happiness < 45 {
+        PetLines.lonely(species)
+      } else {
+        PetLines.lonely(species) + PetLines.checkIn(species)
+      }
+    say(PetLines.pick(pool, recent: &recentSays), seconds: 3.6, force: force)
   }
 
   private func chooseNext() {
@@ -720,16 +796,20 @@ import AppKit
     }
     let hungry = fullness < 35
     let sad = happiness < 35
-    let needy = hungry || sad
-    // Needier → talk more often.
-    let interval = Int((needy ? 40.0 : 85.0) * fps)
+    let needy = hungry || sad || seekingAttention
+    // Begging after an idle wake → chatty; needier → more often.
+    let interval = Int((seekingAttention ? 22.0 : (needy ? 40.0 : 85.0)) * fps)
     guard tick % interval == 0 else { return }
     // Don't stomp a gesture bubble that's still being read.
     if bubble != nil, bubbleTicks > Int(0.8 * fps) { return }
 
-    let chance: Double = needy ? 0.95 : 0.55
+    let chance: Double = seekingAttention ? 1.0 : (needy ? 0.95 : 0.55)
     guard Double.random(in: 0..<1) < chance else { return }
 
+    if seekingAttention {
+      begForAttention(force: false)
+      return
+    }
     let pool: [String] =
       if hungry && sad {
         PetLines.hungry(species) + PetLines.lonely(species)
@@ -856,6 +936,7 @@ import AppKit
   // MARK: Mouse
 
   func grab(clickCount: Int = 1) {
+    noteUserTouch()
     // Break out of any stuck visit / freeze so the pad is always grab-able.
     hostingVisit = false
     if visitor != nil {
@@ -964,9 +1045,12 @@ import AppKit
     return true
   }
 
-  private func enterNap(sayLine: Bool) {
+  private func enterNap(sayLine: Bool, idle: Bool = false) {
     let vf = screenFrame()
     untilWoken = true
+    idleNap = idle
+    seekingAttention = false
+    if idle { idleAsleepAt = ProcessInfo.processInfo.systemUptime }
     // Nap pauses the vibe — dance resumes only after Wake up + music.
     dancingToSpotify = false
     lastBeatPulse = 0
@@ -989,7 +1073,9 @@ import AppKit
 
   private func wakeStickyNap() {
     guard untilWoken || activity == .sleep else { return }
+    noteUserTouch()
     untilWoken = false
+    idleNap = false
     persistNap()
     let vf = screenFrame()
     y = restFloor(in: vf)
@@ -1008,6 +1094,7 @@ import AppKit
   // MARK: Actions
 
   private func pet() {
+    noteUserTouch()
     logApp("self_pet")
     _ = wakeIfNapping()
     happiness = min(100, happiness + 6)
@@ -1031,6 +1118,7 @@ import AppKit
   }
 
   @objc private func feed() {
+    noteUserTouch()
     logApp("self_feed")
     // Always feed *your* pet — never no-op. Full pets still eat (second breakfast).
     _ = wakeIfNapping()
@@ -1048,6 +1136,7 @@ import AppKit
   }
 
   @objc private func play() {
+    noteUserTouch()
     logApp("self_play")
     _ = wakeIfNapping()
     happiness = min(100, happiness + 12)
@@ -1102,6 +1191,7 @@ import AppKit
   }
 
   @objc private func toggleNap() {
+    noteUserTouch()
     logApp(untilWoken || activity == .sleep ? "self_wake" : "self_nap")
     if untilWoken || activity == .sleep {
       wakeStickyNap()
@@ -1121,6 +1211,7 @@ import AppKit
   /// Send an action at a friend — their pet visits *here* for the gesture; theirs also visits *them*.
   /// Carries *your* stats only so they can refresh your FriendBond row — never renames anyone.
   private func sendToFriend(action: String, code: String, name: String) {
+    noteUserTouch()
     Online.shared.setActive(code: code)
     logApp("menu_friend_\(action)", code: code, targetName: name)
     if !Online.shared.appearOnline {
@@ -1342,6 +1433,7 @@ import AppKit
   }
 
   @objc private func chooseSpecies(_ sender: NSMenuItem) {
+    noteUserTouch()
     guard let raw = sender.representedObject as? String,
           let next = Species(rawValue: raw)
     else { return }
@@ -1409,6 +1501,7 @@ import AppKit
   @objc private func petFromMenu() { pet() }
 
   @objc private func pokeSelf() {
+    noteUserTouch()
     logApp("self_poke")
     getAngry(fromPoke: true)
     pushOnline()
@@ -1494,6 +1587,7 @@ import AppKit
   }
 
   @objc private func onlineSetName() {
+    noteUserTouch()
     if let user = prompt(
       "Username",
       message: "Your name (e.g. Viv Test). Friends see “Username’s Pad” — like Viv Test’s Zuzu.",
@@ -1561,6 +1655,7 @@ import AppKit
   }
 
   func menuWillOpen(_ menu: NSMenu) {
+    noteUserTouch()
     menuIsOpen = true
     // Settle mid-hop so the panel doesn’t ride the bounce.
     if activity == .fall {
@@ -1602,7 +1697,7 @@ import AppKit
       menu.addItem(speciesItem)
     }
     // Pad card: name + meters + “Friends can visit” — companion HUD, not Status: Offline.
-    let card = PadMenuCard(frame: NSRect(x: 0, y: 0, width: 248, height: 108))
+    let card = PadMenuCard(frame: NSRect(x: 0, y: 0, width: 248, height: 72))
     card.configure(
       emoji: species.emoji,
       name: petName,
@@ -1707,6 +1802,7 @@ import AppKit
   }
 
   @objc private func toggleDanceToSpotify() {
+    noteUserTouch()
     let dance = SpotifyDance.shared
     guard dance.isAvailable else {
       alert("Dance to Spotify needs macOS 14.2 or later so Mochi can tap Spotify’s audio.")
@@ -1896,8 +1992,10 @@ import AppKit
 
   private func persistNap() {
     let d = UserDefaults.standard
-    d.set(untilWoken, forKey: "mochiStickyNap")
-    if untilWoken {
+    // Only user-requested sticky naps survive relaunch — idle dozes are temporary.
+    let sticky = untilWoken && !idleNap
+    d.set(sticky, forKey: "mochiStickyNap")
+    if sticky {
       d.set(Double(x), forKey: "mochiNapX")
       d.set(Double(y), forKey: "mochiNapY")
     }

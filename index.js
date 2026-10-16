@@ -12,6 +12,10 @@ import {
   getPlayer,
   appendFriendToPlayer,
   logEvent,
+  upsertUserProfile,
+  logBindingEvent,
+  insertFeedback,
+  bumpFriendAction,
 } from "./db.js";
 
 /** Best-effort analytics — never blocks the main request path. */
@@ -22,6 +26,40 @@ function track(evt) {
     ownerName: evt.ownerName || evt.displayName || evt.name,
     clientTs: evt.clientTs || new Date().toISOString(),
   }).catch(() => {});
+}
+
+function binding(evt) {
+  logBindingEvent(evt).catch(() => {});
+}
+
+const CARE_ACTIONS = new Set(["play", "poke", "talk"]);
+
+/** Tally directed care (Vivian poked Evars / Evars poked Vivian) in mochi_friend_actions. */
+function friendAction(evt) {
+  bumpFriendAction(evt).catch(() => {});
+}
+
+/**
+ * From client analytics: menu_friend_poke → actor poked target (once per poke).
+ * Both directions live as separate rows (Vivian→Evars vs Evars→Vivian).
+ * Do not also bump visit_received_* / WS — that would double-count.
+ */
+function maybeLogFriendActionFromEvent(body, event) {
+  const m = /^menu_friend_(.+)$/.exec(event);
+  if (!m || !CARE_ACTIONS.has(m[1])) return;
+  const code = body.code || null;
+  const me = String(body.displayName || body.ownerName || body.name || "").trim();
+  const them = String(body.targetName || "").trim();
+  const deviceId = body.deviceId || body.ownerDeviceId || null;
+  if (!code || !me || !them) return;
+  friendAction({
+    pairCode: code,
+    action: m[1],
+    actorName: me,
+    actorDeviceId: deviceId,
+    peerName: them,
+    reportedByDeviceId: deviceId,
+  });
 }
 
 const PORT = Number(process.env.PORT || 3847);
@@ -473,6 +511,12 @@ const httpServer = createServer(async (req, res) => {
           deviceId, displayName: name, event: "invite_hub_reuse", code: existing.code,
           friendCount: null, payload: { personal: true, pendingBonds: pending.length },
         });
+        if (deviceId) {
+          upsertUserProfile({
+            deviceId, shareCode: existing.code, ownerName: name,
+            padName: body.padName, species: body.species, source: "invite_hub_reuse",
+          }).catch(() => {});
+        }
         return json(res, 200, {
           code: existing.code,
           personal: true,
@@ -501,6 +545,12 @@ const httpServer = createServer(async (req, res) => {
         deviceId, displayName: name, event: "invite_hub_create", code: c,
         payload: { personal: true },
       });
+      if (deviceId) {
+        upsertUserProfile({
+          deviceId, shareCode: c, ownerName: name,
+          padName: body.padName, species: body.species, source: "invite_hub_create",
+        }).catch(() => {});
+      }
       return json(res, 200, { code: c, personal: true, hostName: inv.hostName });
     }
 
@@ -678,6 +728,21 @@ const httpServer = createServer(async (req, res) => {
         targetName: inv.hostName, species,
         payload: { shareCode: c, personalHub: true, hostNotified: reached > 0 },
       });
+      // Historical bindings for both sides (guest + host).
+      if (deviceId) {
+        binding({
+          deviceId, peerDeviceId: inv.hostDeviceId, pairCode: pair, shareCode: c,
+          eventType: "claimed", peerName: inv.hostName,
+          payload: { role: "guest", species },
+        });
+      }
+      if (inv.hostDeviceId) {
+        binding({
+          deviceId: inv.hostDeviceId, peerDeviceId: deviceId, pairCode: pair, shareCode: c,
+          eventType: "claimed", peerName: name,
+          payload: { role: "host", species },
+        });
+      }
       return json(res, 200, {
         code: pair,
         hostName: inv.hostName,
@@ -770,7 +835,74 @@ const httpServer = createServer(async (req, res) => {
       appVersion: body.appVersion || body.version,
       payload: body.payload && typeof body.payload === "object" ? body.payload : {},
     });
+    // Directed friendship tallies (poke/feed/…) — no UI, backend only.
+    maybeLogFriendActionFromEvent(body, event);
+    // Mirror bond removals into binding history when the client logs them.
+    if (event === "remove_friend" || event === "menu_leave_all_bonds") {
+      binding({
+        deviceId: body.deviceId || body.ownerDeviceId,
+        pairCode: body.code,
+        eventType: event === "menu_leave_all_bonds" ? "left_all" : "removed",
+        peerName: body.targetName,
+        payload: body.payload && typeof body.payload === "object" ? body.payload : {},
+      });
+    }
     return json(res, 200, { ok: true });
+  }
+
+  // Menu → Send feedback… → mochi_feedback (or event / file fallback).
+  if (req.method === "POST" && url === "/api/feedback") {
+    const body = await readJson(req);
+    const text = String(body.body || body.text || body.feedback || "").trim();
+    if (!text) return json(res, 400, { error: "body required" });
+    const deviceId = String(body.deviceId || "").slice(0, 64) || null;
+    const ownerName = String(body.ownerName || body.displayName || body.name || "").slice(0, 24) || null;
+    const appVersion = String(body.appVersion || body.version || "").slice(0, 24) || null;
+    const payload = {
+      species: body.species || null,
+      clientTs: body.clientTs || null,
+    };
+    const result = await insertFeedback({
+      deviceId,
+      ownerName,
+      body: text,
+      appVersion,
+      payload,
+    });
+
+    // Always keep a local JSONL copy so feedback survives even without Supabase.
+    let fileOk = false;
+    try {
+      await mkdir(DATA_DIR, { recursive: true });
+      const line = JSON.stringify({
+        at: new Date().toISOString(),
+        deviceId,
+        ownerName,
+        appVersion,
+        body: text,
+        payload,
+        stored: result.stored || null,
+      });
+      await writeFile(join(DATA_DIR, "mochi-feedback.jsonl"), line + "\n", { flag: "a" });
+      fileOk = true;
+    } catch (err) {
+      console.warn("feedback file:", err?.message || err);
+    }
+
+    track({
+      deviceId,
+      displayName: ownerName,
+      event: "feedback_submit",
+      species: body.species,
+      appVersion,
+      payload: { length: text.length, stored: result.stored || (fileOk ? "file" : null) },
+    });
+
+    // Accept if any store succeeded — never 404 for a missing older deploy path again.
+    if (result.ok || fileOk) {
+      return json(res, 200, { ok: true, stored: result.stored || "file" });
+    }
+    return json(res, 503, { error: result.error || "feedback unavailable" });
   }
 
   // Pull cloud profile + friends. deviceId is the stable pad key (one Mac = one user).
@@ -828,8 +960,16 @@ const httpServer = createServer(async (req, res) => {
           happiness: Number(f.happiness) || 80,
           lastActivity: f.lastActivity ? String(f.lastActivity).slice(0, 80) : null,
           species: String(f.species || "dog").slice(0, 12),
+          sentCount: Math.max(0, Math.min(99999, Number(f.sentCount) || 0)),
+          recvCount: Math.max(0, Math.min(99999, Number(f.recvCount) || 0)),
         }))
       : [];
+    const ownerName = String(body.ownerName || "").slice(0, 18) || null;
+    const padName = String(body.padName || "").slice(0, 12) || null;
+    const shareCode = String(body.shareCode || "")
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "")
+      .slice(0, 6) || null;
     const result = await upsertPlayer({
       deviceId,
       displayName,
@@ -838,13 +978,36 @@ const httpServer = createServer(async (req, res) => {
       happiness: body.happiness,
       friends,
       activeCode: body.activeCode,
+      ownerName,
+      padName,
+      shareCode,
     });
     if (!result.ok) return json(res, 500, { error: result.error });
+    // Users table + field changelog (renames / species / share code).
+    await upsertUserProfile({
+      deviceId,
+      shareCode: shareCode || undefined,
+      ownerName: ownerName || displayName,
+      padName: padName || "Zuzu",
+      species: body.species,
+      source: "cloud_push",
+    }).catch(() => {});
     // Name change → update every bond row where this device is host or guest.
     const renamed = prev && prev.display_name !== displayName;
     if (renamed) {
       renameDeviceInMemory(deviceId, displayName);
       await renameDeviceOnBonds(deviceId, displayName);
+      binding({
+        deviceId,
+        eventType: "renamed",
+        peerName: displayName,
+        payload: {
+          oldName: prev.display_name,
+          newName: displayName,
+          ownerName,
+          padName,
+        },
+      });
     }
     // Warm invite directory from this pad's friend list (never wipe an existing guest lock).
     for (const f of friends) {
@@ -1163,11 +1326,14 @@ wss.on("connection", (ws) => {
       // Don't echo actions back to the actor — local UI already recorded "you: pet".
       // Stats-only syncs still fan out to peers (and skip the sender).
       if (action) {
+        const peerName =
+          [...room.members.values()].find((n) => n && n !== fromName) || null;
         track({
           deviceId: ws.deviceId,
           displayName: fromName,
           event: `action_${action}`,
           code: room.code,
+          targetName: peerName,
           species: msg.species || (fromName && room.species.get(fromName)) || null,
           payload: { fullness: mine?.fullness, happiness: mine?.happiness },
         });

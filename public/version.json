@@ -1,6 +1,6 @@
 {
-  "version": "0.5.5",
+  "version": "0.5.6",
   "url": "/CoPet.zip",
-  "notes": "Product analytics events (menu + friend actions). Privacy: CoPet does not snoop your Mac.",
-  "publishedAt": "2026-10-16T02:40:23Z"
+  "notes": "Full event logging to Supabase (owner, metrics, timestamps).",
+  "publishedAt": "2026-10-16T02:47:54Z"
 }

@@ -6,16 +6,16 @@
     <description>CoPet updates</description>
     <language>en</language>
     <item>
-      <title>CoPet 0.5.5</title>
-      <pubDate>2026-10-16T02:40:23Z</pubDate>
-      <sparkle:version>16</sparkle:version>
-      <sparkle:shortVersionString>0.5.5</sparkle:shortVersionString>
+      <title>CoPet 0.5.6</title>
+      <pubDate>2026-10-16T02:47:54Z</pubDate>
+      <sparkle:version>17</sparkle:version>
+      <sparkle:shortVersionString>0.5.6</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-      <description><![CDATA[Product analytics events (menu + friend actions). Privacy: CoPet does not snoop your Mac.]]></description>
+      <description><![CDATA[Full event logging to Supabase (owner, metrics, timestamps).]]></description>
       <enclosure
         url="https://tamagotchi-udtz.onrender.com/CoPet.zip"
-        sparkle:edSignature="hbI8YB2d5/3Xiv5aT8d3iVvE1euIPoNhylQd+zp2fBZGWXXI9/8EgozFED8dZqNamUAICpo3jOklOwmZqQliBw=="
-        length="1669510"
+        sparkle:edSignature="yoVa9BkN8b/7avQU3tLhQlt3NmgLefxGehXI+n/eIz2c0kqjDmco40gBexPOsCfAOZEuguNRIIxzR52FK1HNAg=="
+        length="1675592"
         type="application/octet-stream" />
     </item>
   </channel>

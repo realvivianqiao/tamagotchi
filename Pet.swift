@@ -402,17 +402,16 @@ import AppKit
       let floor = restFloor(in: vf)
       if y <= floor {
         y = floor
-        // Bounce when dropped from height — reverse + damp so it settles in a few hops.
+        // One bounce when dropped from height, then settle.
         let bounceThresh: CGFloat = species == .bird ? -5 : -4
-        if vy < bounceThresh, bounceCount < 3 {
-          bounceCount += 1
-          let damp: CGFloat = species == .bird ? 0.42 : 0.58
+        if vy < bounceThresh, bounceCount < 1 {
+          bounceCount = 1
+          let damp: CGFloat = species == .bird ? 0.38 : 0.5
           vy = -vy * damp
-          // Keep a little upward pop so tall drops feel bouncy.
-          if bounceCount == 1 { vy = max(vy, species == .bird ? 5 : 7) }
-          vx *= 0.65
+          vy = max(vy, species == .bird ? 4 : 5.5)
+          vx *= 0.6
           squashTicks = 8
-          if bounceCount == 1 { emit("💨") }
+          emit("💨")
         } else {
           land(impact: vy)
         }

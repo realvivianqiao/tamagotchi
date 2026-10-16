@@ -1,6 +1,6 @@
 {
-  "version": "0.5.16",
+  "version": "0.5.17",
   "url": "/CoPet.zip",
-  "notes": "Block phantom pads; visitors only for real friend actions.",
-  "publishedAt": "2026-10-16T03:22:20Z"
+  "notes": "Only one bounce when the pet lands from a fall.",
+  "publishedAt": "2026-10-16T03:23:24Z"
 }

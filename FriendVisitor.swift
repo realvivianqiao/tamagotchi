@@ -648,6 +648,7 @@ import AppKit
   fileprivate var drawParticles: [Particle] { particles }
   fileprivate var drawNameplate: String? {
     guard showNameplate else { return nil }
+    // `name` is already "Username's Pad" from the friend bond / visit label.
     return "\(name) \(species.emoji)"
   }
 }

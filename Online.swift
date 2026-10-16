@@ -77,6 +77,9 @@ struct FriendBond: Codable, Equatable {
 
   /// Old bundle id used UserDefaults under this suite — migrate so CoPet keeps the same pad.
   private static let legacySuiteName = "com.vivianqiao.mochi"
+  private static let ownerKey = "mochiOwnerName"
+  private static let padKey = "mochiPadName"
+
   private static let migrateKeys = [
     "mochiDeviceId", "mochiName", "mochiSpecies", "mochiFriends", "mochiActiveCode",
     "mochiBondCode", "mochiBondPartner", "mochiStickyNap", "mochiNapX", "mochiNapY",
@@ -117,18 +120,82 @@ struct FriendBond: Codable, Equatable {
     return id
   }
 
-  var displayName: String {
+  /// Human / account name (e.g. "Viv Test").
+  var ownerName: String {
     get {
-      let n = UserDefaults.standard.string(forKey: "mochiName")?.trimmingCharacters(in: .whitespacesAndNewlines)
-      return (n?.isEmpty == false) ? n! : NSFullUserName().split(separator: " ").first.map(String.init) ?? "me"
+      migrateIdentityIfNeeded()
+      let n = UserDefaults.standard.string(forKey: Self.ownerKey)?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      if let n, !n.isEmpty { return String(n.prefix(18)) }
+      return NSFullUserName().split(separator: " ").first.map(String.init) ?? "me"
     }
     set {
-      let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-      let old = UserDefaults.standard.string(forKey: "mochiName")
+      migrateIdentityIfNeeded()
+      let trimmed = String(newValue.trimmingCharacters(in: .whitespacesAndNewlines).prefix(18))
+      let oldLabel = displayName
+      UserDefaults.standard.set(trimmed, forKey: Self.ownerKey)
+      // Keep legacy key in sync for older cloud rows.
       UserDefaults.standard.set(trimmed, forKey: "mochiName")
       cloudPush(fullness: nil, happiness: nil)
-      if old != trimmed {
-        broadcastRename(trimmed)
+      let next = displayName
+      if oldLabel != next { broadcastRename(next) }
+    }
+  }
+
+  /// Pet / pad name (e.g. "Zuzu", "Puff", "Bloop").
+  var padName: String {
+    get {
+      migrateIdentityIfNeeded()
+      let n = UserDefaults.standard.string(forKey: Self.padKey)?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      if let n, !n.isEmpty { return String(n.prefix(12)) }
+      return mySpecies.defaultName
+    }
+    set {
+      migrateIdentityIfNeeded()
+      let trimmed = String(newValue.trimmingCharacters(in: .whitespacesAndNewlines).prefix(12))
+      let oldLabel = displayName
+      UserDefaults.standard.set(trimmed.isEmpty ? mySpecies.defaultName : trimmed, forKey: Self.padKey)
+      cloudPush(fullness: nil, happiness: nil)
+      let next = displayName
+      if oldLabel != next { broadcastRename(next) }
+    }
+  }
+
+  /// What friends see on the wire + visits: "Viv Test's Zuzu".
+  var displayName: String {
+    get {
+      migrateIdentityIfNeeded()
+      let full = "\(ownerName)'s \(padName)"
+      return String(full.prefix(24))
+    }
+    set {
+      // Back-compat: a single rename still means username; pad stays the pet default.
+      ownerName = newValue
+    }
+  }
+
+  /// One-time split of old `mochiName` into username + pad.
+  private func migrateIdentityIfNeeded() {
+    let d = UserDefaults.standard
+    if d.string(forKey: Self.ownerKey) != nil, d.string(forKey: Self.padKey) != nil { return }
+    let legacy = d.string(forKey: "mochiName")?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let sp = Species.parse(d.string(forKey: "mochiSpecies"))
+    let defaults = Set(Species.allCases.map(\.defaultName))
+    if d.string(forKey: Self.padKey) == nil {
+      // Old single name was usually the human ("Viv Test") — pad becomes Zuzu/Puff/Bloop.
+      if let legacy, defaults.contains(legacy) {
+        d.set(legacy, forKey: Self.padKey)
+      } else {
+        d.set(sp.defaultName, forKey: Self.padKey)
+      }
+    }
+    if d.string(forKey: Self.ownerKey) == nil {
+      if let legacy, !legacy.isEmpty, !defaults.contains(legacy) {
+        d.set(legacy, forKey: Self.ownerKey)
+      } else {
+        let guess = NSFullUserName().split(separator: " ").first.map(String.init) ?? "me"
+        d.set(guess, forKey: Self.ownerKey)
       }
     }
   }
@@ -136,7 +203,14 @@ struct FriendBond: Codable, Equatable {
   var mySpecies: Species {
     get { Species.parse(UserDefaults.standard.string(forKey: "mochiSpecies")) }
     set {
+      let oldDefault = mySpecies.defaultName
       UserDefaults.standard.set(newValue.rawValue, forKey: "mochiSpecies")
+      // Follow the new pet’s default pad name if they hadn’t customized it.
+      let pad = UserDefaults.standard.string(forKey: Self.padKey)
+      if pad == nil || pad == oldDefault {
+        UserDefaults.standard.set(newValue.defaultName, forKey: Self.padKey)
+        broadcastRename(displayName)
+      }
       cloudPush(fullness: nil, happiness: nil)
     }
   }

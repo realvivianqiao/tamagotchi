@@ -1,6 +1,6 @@
 {
-  "version": "0.5.8",
+  "version": "0.5.9",
   "url": "/CoPet.zip",
-  "notes": "Visits spawn close, gesture together ~5s, short labels.",
-  "publishedAt": "2026-10-16T03:01:16Z"
+  "notes": "Names are Username + pad (e.g. Viv Test\u2019s Zuzu).",
+  "publishedAt": "2026-10-16T03:03:18Z"
 }

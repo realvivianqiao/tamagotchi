@@ -38,10 +38,10 @@ import AppKit
 
   private var fullness: Double
   private var happiness: Double
-  /// Your chosen name (My name…) — never overwritten by friend presence/sync.
+  /// Username + pad — e.g. "Viv Test's Zuzu". Never overwritten by friend sync.
   private var petName: String {
     let n = Online.shared.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-    return n.isEmpty ? defaultPetName : n
+    return n.isEmpty ? "me's \(defaultPetName)" : n
   }
   private var applyingRemote = false
   private var onlineNote: String?
@@ -82,11 +82,12 @@ import AppKit
     menu.delegate = self
     wireOnline()
 
-    // First download / fresh install: pick Zuzu, Bloop, or Puff.
+    // First download / fresh install: pick Zuzu, Bloop, or Puff as the pad.
     if !PetPicker.hasChosen {
       let pick = PetPicker.runModal()
       species = pick
-      Online.shared.displayName = pick.defaultName
+      Online.shared.mySpecies = pick
+      Online.shared.padName = pick.defaultName
       sprites.removeAll()
       statusItem.button?.title = pick.emoji
       say("hi! i'm \(pick.defaultName)", seconds: 3.5)
@@ -1166,16 +1167,11 @@ import AppKit
           let next = Species(rawValue: raw)
     else { return }
     logApp("choose_species", extra: ["from": species.rawValue, "to": next.rawValue])
-    let oldDefault = species.defaultName
     species = next
-    Online.shared.mySpecies = next
-    // If they were still using the old default name, switch to the new pet's name.
-    if Online.shared.displayName == oldDefault || Online.shared.displayName == defaultPetName {
-      Online.shared.displayName = next.defaultName
-    }
+    Online.shared.mySpecies = next // also rolls pad name if it was the old default
     sprites.removeAll()
     refreshStatusItem()
-    say("hi! i'm \(Online.shared.displayName)", seconds: 2)
+    say("hi! i'm \(Online.shared.padName)", seconds: 2)
     pushOnline() // tell friends your new look
     render()
   }
@@ -1349,20 +1345,31 @@ import AppKit
   }
 
   @objc private func onlineSetName() {
-    if let name = prompt(
-      "Your name",
-      message: "This is your pet’s name in the menu, and what friends see when they pet/feed you.",
-      placeholder: Online.shared.displayName),
-       !name.isEmpty
+    if let user = prompt(
+      "Your username",
+      message: "Your name (e.g. Viv Test). Friends see “Username’s Pad” — like Viv Test’s Zuzu.",
+      placeholder: Online.shared.ownerName),
+       !user.isEmpty
     {
-      logApp("rename", extra: ["newName": name])
-      Online.shared.displayName = name
-      refreshStatusItem()
+      Online.shared.ownerName = user
+      logApp("rename_owner", extra: ["owner": user])
     }
+    if let pad = prompt(
+      "Pad name",
+      message: "Your pet’s name on this Mac. Defaults: Zuzu (dog), Puff (bird), Bloop (octopus).",
+      placeholder: Online.shared.padName),
+       !pad.isEmpty
+    {
+      Online.shared.padName = pad
+      logApp("rename_pad", extra: ["pad": pad])
+    }
+    refreshStatusItem()
+    say("hi! i'm \(Online.shared.displayName)", seconds: 3)
   }
 
   private func ensureDisplayName() {
-    if UserDefaults.standard.string(forKey: "mochiName") == nil {
+    let d = UserDefaults.standard
+    if d.string(forKey: "mochiOwnerName") == nil, d.string(forKey: "mochiName") == nil {
       onlineSetName()
     }
   }
@@ -1511,7 +1518,7 @@ import AppKit
     }
     bondsItem.submenu = bondsMenu
     menu.addItem(bondsItem)
-    menu.addItem(item("My name…", #selector(onlineSetName), symbol: "pencil"))
+    menu.addItem(item("My username / pad…", #selector(onlineSetName), symbol: "pencil"))
     menu.addItem(item("Check for updates…", #selector(checkForUpdates), symbol: "arrow.triangle.2.circlepath"))
     menu.addItem(.separator())
     menu.addItem(item("Quit", #selector(quit), symbol: "xmark.circle"))

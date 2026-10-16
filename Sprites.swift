@@ -137,6 +137,56 @@ struct Sprite {
   let head: (x: Int, y: Int) // head offset from the standing pose
 }
 
+/// Where a click landed on the pixel pet (canvas space, facing right).
+enum BodyPart: String {
+  case nose   // dog nose / bird beak / octopus mouth zone
+  case head
+  case ear    // dog ear / bird tuft / octopus soft highlight
+  case belly
+  case limb   // paw / wing / foot / raised arm
+  case tail   // dog tail / octopus tentacle
+  case body
+
+  /// Rough hit zones from sprite pixels (facing right; caller mirrors col).
+  static func hit(species: Species, col: Int, row: Int, head: (x: Int, y: Int)) -> BodyPart {
+    let hx = head.x, hy = head.y
+    switch species {
+    case .dog:
+      if col <= 9 { return .tail }
+      if col >= 31 + hx, row >= 8 + hy, row <= 14 + hy { return .nose }
+      if col >= 18 + hx, col <= 24 + hx, row >= 5 + hy, row <= 13 + hy { return .ear }
+      if col >= 19 + hx, col <= 34 + hx, row >= 3 + hy, row <= 13 + hy { return .head }
+      if row >= 21 { return .limb }
+      if row >= 15, row <= 21, col >= 9, col <= 22 { return .belly }
+      return .body
+    case .bird:
+      // Tuft on top
+      if row <= 5 + hy { return .ear }
+      // Orange beak (center face)
+      if col >= 15, col <= 20, row >= 6 + hy, row <= 12 + hy { return .nose }
+      // Side wings
+      if col <= 12 || col >= 24 {
+        if row >= 8 + hy, row <= 18 + hy { return .limb }
+      }
+      if row >= 22 { return .limb }
+      if col >= 13, col <= 22, row >= 12 + hy, row <= 20 + hy { return .belly }
+      if col >= 12, col <= 24, row >= 4 + hy, row <= 14 + hy { return .head }
+      return .body
+    case .octopus:
+      // Tentacles along the bottom
+      if row >= 20 { return .tail }
+      // Soft pink highlight on upper-left head
+      if col >= 11, col <= 17, row >= 2 + hy, row <= 8 + hy { return .ear }
+      // Face / mouth band
+      if col >= 14, col <= 22, row >= 9 + hy, row <= 15 + hy { return .nose }
+      // Upper dome
+      if row <= 10 + hy { return .head }
+      if col >= 12, col <= 23, row >= 11 + hy, row <= 19 { return .belly }
+      return .body
+    }
+  }
+}
+
 /// Pixel pets facing right; the view mirrors them to face left.
 enum Dog {
   static func sprite(_ look: Look) -> Sprite {
@@ -231,20 +281,30 @@ enum Dog {
 
   private static func drawOctopus(_ c: inout Canvas, _ look: Look) -> (Int, Int) {
     let bob = look.wag > 0 ? 1 : 0
+    let patting = look.pose == .hang
     let (bodyY, footY): (Double, Double) = {
       switch look.pose {
       case .lie: return (17.5, 23.5)
-      case .hang: return (11.0, 22.0)
+      case .hang: return (10.0, 23.0) // lean up a bit while one arm pets
       default: return (11.0 - Double(bob), 23.5)
       }
     }()
 
-    // five short flat tentacles (sitting on the ground)
+    // Ground tentacles — when patting, skip the far-right arm (it’s raised instead).
     let feetX = [9.5, 13.5, 17.5, 21.5, 25.5]
     for (i, fx) in feetX.enumerated() {
+      if patting, i == 4 { continue }
       let wave = (look.wag > 0 ? 0.8 : 0) * (i % 2 == 0 ? 1 : -1)
       c.ellipse(fx + wave, footY - 1.2, 1.9, 2.2, .purple)
       c.ellipse(fx + wave, footY + 0.4, 2.1, 1.5, .purple)
+    }
+
+    if patting {
+      // One arm lifts over and pats — reads as a hand, not a hover.
+      c.ellipse(26.5, bodyY + 1.5, 1.7, 2.4, .purple)
+      c.ellipse(28.5, bodyY - 2.5, 1.9, 2.2, .purple)
+      c.ellipse(29.5, bodyY - 6.5, 2.2, 2.0, .purple)
+      c.ellipse(28.8, bodyY - 9.0, 2.4, 1.6, .pink) // soft “palm”
     }
 
     // big round head

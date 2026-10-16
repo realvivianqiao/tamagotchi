@@ -38,10 +38,10 @@ import AppKit
 
   private var fullness: Double
   private var happiness: Double
-  /// Username + pad — e.g. "Viv Test's Zuzu". Never overwritten by friend sync.
+  /// Username + pet — e.g. "Viv Test's Zuzu" / "Ivars' Zuzu". Never overwritten by friend sync.
   private var petName: String {
     let n = Online.shared.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-    return n.isEmpty ? "me's \(defaultPetName)" : n
+    return n.isEmpty ? "\(Online.possessive("me")) \(defaultPetName)" : n
   }
   private var applyingRemote = false
   private var onlineNote: String?
@@ -54,12 +54,14 @@ import AppKit
   private var hostingVisit = false
   /// Friend codes we've already announced as online this stretch (no spam).
   private var announcedOnline: Set<String> = []
+  /// First presence snapshot only seeds who’s already online — no “just joined” spam.
+  private var presenceBootstrapped = false
   /// When a friend last looked offline — clear announce after a real disconnect.
   private var offlineSince: [String: Date] = [:]
   /// Dedupe — keepalive / double-sync must not spawn phantom pads.
   private var lastVisitKey: String?
   private var lastVisitAt: TimeInterval = 0
-  private static let visitActions: Set<String> = ["feed", "play", "pet", "poke", "nap"]
+  private static let visitActions: Set<String> = ["play", "poke", "talk"]
   /// Spotify is playing and Dance to Spotify is on — pulse on beat, chill wander.
   private var dancingToSpotify = false
   private var lastBeatPulse: TimeInterval = 0
@@ -67,11 +69,18 @@ import AppKit
   private var lastBeatStrength: Double = 0.6
   /// When true, beat squash stretches tall instead of flat (PetView).
   private(set) var danceStretch = false
+  /// Explicit dance pose so we aren’t stuck toggling sit ↔ walk legs.
+  private var dancePoseOverride: Pose?
+  private var dancePoseTicks = 0
   /// Status / context menu open — freeze dance so the menu doesn’t bounce with hops.
   private var menuIsOpen = false
 
   private var grabStart = CGPoint.zero, lastMouse = CGPoint.zero, grabOffset = CGPoint.zero
-  private var swallowRelease = false // double-click nap/wake — don't also pet()
+  /// Which body part the current press landed on (nose / head / tail…).
+  private var grabPart: BodyPart = .body
+  private var swallowRelease = false // double-click hide — don't also body-touch
+  /// Wall-clock of last click-up — backup double-click detect if clickCount is flaky.
+  private var lastClickReleaseAt: TimeInterval = 0
   private var pendingPetWork: DispatchWorkItem?
   private var lastDragTime: TimeInterval = 0
   private var throwVelocity = CGVector.zero
@@ -79,6 +88,10 @@ import AppKit
   /// True from mouseDown through mouseUp so hit-testing can’t drop the drag mid-air.
   private var grabbing = false
   private var visitStartedAt: TimeInterval = 0
+  /// Raised paw / tentacle while giving pets on an outgoing visit.
+  private var visitPawTicks = 0
+  /// Which care action is playing with the guest (drives host choreography).
+  private var visitActionPlaying: String?
   /// Last time the human poked / fed / dragged / opened the menu, etc.
   private var lastUserTouch = ProcessInfo.processInfo.systemUptime
   /// Auto-nap from boredom (can self-wake and beg). User Nap stays sticky.
@@ -91,6 +104,11 @@ import AppKit
   private static let idleNapSleepFor: TimeInterval = 2.5 * 60
   /// Ignored after waking → back to sleep.
   private static let attentionIdleAfter: TimeInterval = 90
+  /// How long you’ve been looking at the screen before a stretch / eye reminder.
+  private static let stretchAfter: TimeInterval = 45 * 60
+  /// Screen-on work clock (resets when the display sleeps or the Mac wakes).
+  private var screenSessionStartedAt: TimeInterval = ProcessInfo.processInfo.systemUptime
+  private var screenSessionActive = true
 
   override init() {
     let screen = NSScreen.main!.visibleFrame
@@ -157,20 +175,71 @@ import AppKit
         self?.say(text, seconds: secs)
       }
     }
-    // Opening the laptop lid / waking from sleep → hello again.
-    NSWorkspace.shared.notificationCenter.addObserver(
+    let nc = NSWorkspace.shared.notificationCenter
+    // Opening the laptop lid / waking from sleep → hello again + fresh work clock.
+    nc.addObserver(
       forName: NSWorkspace.didWakeNotification,
       object: nil,
       queue: .main
     ) { [weak self] _ in
       Task { @MainActor in
-        guard let self, !self.hidden else { return }
+        guard let self else { return }
+        self.beginScreenSession()
+        guard !self.hidden else { return }
         try? await Task.sleep(nanoseconds: 1_000_000_000)
         Ambient.shared.maybeGreet(species: self.species, asleep: self.isAsleep, force: true) {
           [weak self] text, secs in
           self?.say(text, seconds: secs)
         }
       }
+    }
+    // Display off → pause the “you’ve been staring” clock.
+    nc.addObserver(
+      forName: NSWorkspace.screensDidSleepNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      Task { @MainActor in self?.screenSessionActive = false }
+    }
+    // Display back on → start a new stretch window.
+    nc.addObserver(
+      forName: NSWorkspace.screensDidWakeNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      Task { @MainActor in self?.beginScreenSession() }
+    }
+  }
+
+  private func beginScreenSession() {
+    screenSessionActive = true
+    screenSessionStartedAt = ProcessInfo.processInfo.systemUptime
+  }
+
+  /// Soft wellness nudge after ~45 min of continuous screen-on time.
+  private func maybeStretchBreak() {
+    guard screenSessionActive, !hidden, !isAsleep, !grabbing, !menuIsOpen else { return }
+    // Don’t stomp a visit / gesture bubble.
+    if bubble != nil, bubbleTicks > Int(1.0 * fps) { return }
+    if hostingVisit || visitor?.isVisiting == true { return }
+    let now = ProcessInfo.processInfo.systemUptime
+    guard now - screenSessionStartedAt >= Self.stretchAfter else { return }
+    // Roll the window forward so the next nudge is another full stretch later.
+    screenSessionStartedAt = now
+    logApp("stretch_remind")
+    sayFresh(PetLines.stretchBreak(species), seconds: 4.2)
+    happyTicks = max(happyTicks, Int(2 * fps))
+    switch species {
+    case .dog:
+      emit("👀", count: 1)
+      hop()
+    case .bird:
+      emit("👀", count: 1)
+      y = restFloor(in: screenFrame()) + 12
+      set(.fly, seconds: 2.2)
+    case .octopus:
+      emit("👀", count: 1)
+      set(.glide, seconds: 2.4)
     }
   }
 
@@ -220,9 +289,50 @@ import AppKit
     ])
   }
 
+  /// Hide the desktop pad; reopen from the menu-bar emoji → Show.
+  private func setHidden(_ hide: Bool) {
+    guard hidden != hide else { return }
+    hidden = hide
+    grabbing = false
+    dragged = false
+    swallowRelease = hide
+    pendingPetWork?.cancel()
+    pendingPetWork = nil
+    hostingVisit = false
+    if hide {
+      visitor?.dismiss()
+      visitor = nil
+      bubble = nil
+      bubbleTicks = 0
+      particles.removeAll()
+      activity = .sit
+      activityTicks = 0
+      window.alphaValue = 0
+      window.orderOut(nil)
+      window.ignoresMouseEvents = true
+      logApp("hide")
+    } else {
+      window.alphaValue = 1
+      window.ignoresMouseEvents = false
+      window.orderFrontRegardless()
+      y = restFloor(in: screenFrame())
+      activity = .sit
+      activityTicks = Int(2 * fps)
+      render()
+      logApp("show")
+      say("missed you", seconds: 2.0)
+    }
+    refreshStatusItem()
+  }
+
+  @objc private func showPet() {
+    noteUserTouch()
+    setHidden(false)
+  }
+
   private func refreshStatusItem() {
     if hidden {
-      statusItem.button?.title = "😴"
+      statusItem.button?.title = "🫥"
       return
     }
     if !Online.shared.appearOnline {
@@ -233,22 +343,38 @@ import AppKit
     statusItem.button?.title = onlineCount > 0 ? "\(species.emoji)🟢" : species.emoji
   }
 
-  /// Only announce when someone *just* comes online. No minute-by-minute spam.
+  /// Only announce a real offline → online transition. Never for “already online.”
   private func handlePresenceAnnouncements() {
+    // While you’re hidden from friends, presence flaps are noise — ignore.
+    guard Online.shared.appearOnline else { return }
+
+    let friends = Online.shared.friends.filter { !$0.waiting }
+    if !presenceBootstrapped {
+      // Seed who’s already online so launch / reconnect doesn’t spam bubbles.
+      for f in friends where f.online {
+        announcedOnline.insert(f.code)
+      }
+      presenceBootstrapped = true
+      partnerWasOnline = Online.shared.partnerOnline
+      return
+    }
+
     let now = Date()
-    for f in Online.shared.friends where !f.waiting {
+    for f in friends {
       if f.online {
         offlineSince[f.code] = nil
-        // First time we see them online this stretch → one bubble, then silence.
-        if !announcedOnline.contains(f.code), !hidden {
+        if !announcedOnline.contains(f.code) {
           announcedOnline.insert(f.code)
-          say("\(f.partnerName) is online! 🟢", seconds: 2.2)
+          if !hidden {
+            let who = Online.tidyPossessiveLabel(f.partnerName)
+            say("\(who) is online! 🟢", seconds: 3.0)
+          }
         }
       } else if announcedOnline.contains(f.code) {
-        // Must stay offline a bit before we allow another “just online” later.
+        // Short grace so a WS blip doesn’t re-fire “online!” a second later.
         let started = offlineSince[f.code] ?? now
         offlineSince[f.code] = started
-        if now.timeIntervalSince(started) >= 60 {
+        if now.timeIntervalSince(started) >= 20 {
           announcedOnline.remove(f.code)
           offlineSince[f.code] = nil
         }
@@ -262,34 +388,23 @@ import AppKit
     // they cannot change activity except an explicit poke (wake + mad).
     if untilWoken, action != "poke" {
       switch action {
-      case "feed":
-        fullness = min(100, fullness + 35)
+      case "play", "talk":
         happiness = min(100, happiness + 4)
-      case "play", "pet":
-        happiness = min(100, happiness + 4)
-      case "nap":
-        break
       default:
         break
       }
       return
     }
     switch action {
-    case "feed":
-      fullness = min(100, fullness + 35)
-      happiness = min(100, happiness + 4)
-      set(.eat, seconds: 3)
-      emit("🍖")
     case "play":
       happiness = min(100, happiness + 12)
       startSignatureMove(seconds: 6)
-    case "pet":
-      happiness = min(100, happiness + 6)
-      happyTicks = Int(2 * fps)
-      emit("❤️", count: 3)
-      if activity != .sleep && !untilWoken { hop() }
-    case "nap":
-      enterNap(sayLine: false)
+    case "talk":
+      happiness = min(100, happiness + 5)
+      happyTicks = Int(3 * fps)
+      set(.sit, seconds: 3.2)
+      emit("💬", count: 2)
+      sayFresh(PetLines.talk(species))
     case "poke":
       getAngry(fromPoke: true)
     default:
@@ -352,6 +467,7 @@ import AppKit
       wanderLock = nil
       y = sleepFloor(in: screenFrame())
       pinStaticSleepZzz()
+      tickBubble() // still expire “friend online” bubbles while napping
       updateParticles()
       render()
       return
@@ -361,6 +477,8 @@ import AppKit
     animate()
     updateParticles()
     chatter()
+    // Check about once a second — cheap and won’t spam mid-frame.
+    if tick % Int(fps) == 0 { maybeStretchBreak() }
     render()
   }
 
@@ -370,22 +488,26 @@ import AppKit
 
     // Safety: a stalled visit must not pin the pad mid-air forever.
     if hostingVisit, visitStartedAt > 0,
-       ProcessInfo.processInfo.systemUptime - visitStartedAt > 6
+       ProcessInfo.processInfo.systemUptime - visitStartedAt > 12
     {
       hostingVisit = false
       visitor?.dismiss()
       visitor = nil
     }
 
-    // Don't stroll away mid-visit — guest is glued to you.
+    // Don't stroll away mid-visit — stay put, but keep the gesture pose animating
+    // (run/walk/fly frames). Never convert fly→sit mid-play/poke.
     if hostingVisit || visitor?.isVisiting == true {
-      if activity == .walk || activity == .run || activity == .fly || activity == .glide {
-        // Sit still at rest height — never freeze mid-flight forever.
+      if activity == .walk || activity == .run {
         y = restFloor(in: vf)
-        if activity == .fly || activity == .glide {
-          activity = .sit
-          activityTicks = Int(1.5 * fps)
-        }
+        if tick % 8 == 0 { walkFrame ^= 1 }
+        return
+      }
+      if activity == .fly || activity == .glide {
+        // Soft bob in place — still reads as flying/drifting.
+        let base = species == .bird ? restFloor(in: vf) + 28 : restFloor(in: vf) + 14
+        y = base + CGFloat(sin(Double(tick) / 5)) * 5
+        if tick % 8 == 0 { walkFrame ^= 1 }
         return
       }
     }
@@ -423,21 +545,21 @@ import AppKit
         if y >= ceiling { y = ceiling; dir = -1 }
       }
       y = min(max(y, perch), ceiling)
-    case .glide: // octopus — horizontal or vertical drift, never both
+    case .glide: // octopus — slow menace drift (never zippy)
       switch wanderAxis {
       case .horizontal:
-        x += dir * 0.28
+        x += dir * 0.12
         if let lock = wanderLock { y = lock }
-        if Int.random(in: 0..<180) == 0 { dir = -dir }
+        if Int.random(in: 0..<260) == 0 { dir = -dir }
       case .vertical:
         let low = vf.minY + 12
-        let high = vf.minY + 70
+        let high = vf.minY + 55
         if let lock = wanderLock { x = lock }
-        y += dir * 0.22
+        y += dir * 0.09
         if y <= low { y = low; dir = 1 }
         if y >= high { y = high; dir = -1 }
       }
-      if tick % 90 == 0 { emit(["💧", "🫧"].randomElement()!) }
+      if tick % 140 == 0 { emit(["💧", "🫧"].randomElement()!) }
     case .fall:
       vy -= species == .bird ? 0.55 : 0.9 // birds flutter-fall
       if species == .bird { vx *= 0.98 }
@@ -531,7 +653,7 @@ import AppKit
   private var walkSpeed: CGFloat {
     switch species {
     case .bird: return 0.28 // gentle hop-walk
-    case .octopus: return 0.18 // awkward on “land”
+    case .octopus: return 0.10 // lazy on “land”
     case .dog: return fullness < 20 ? 0.26 : 0.38
     }
   }
@@ -543,11 +665,13 @@ import AppKit
     if squashTicks > 0 { squashTicks -= 1 }
     happyTicks = max(0, happyTicks - 1)
     angryTicks = max(0, angryTicks - 1)
-    if blinkTicks > 0 { blinkTicks -= 1 } else if Int.random(in: 0..<150) == 0 { blinkTicks = 4 }
-    if bubbleTicks > 0 {
-      bubbleTicks -= 1
-      if bubbleTicks == 0 { bubble = nil }
+    visitPawTicks = max(0, visitPawTicks - 1)
+    if dancePoseTicks > 0 {
+      dancePoseTicks -= 1
+      if dancePoseTicks == 0 { dancePoseOverride = nil }
     }
+    if blinkTicks > 0 { blinkTicks -= 1 } else if Int.random(in: 0..<150) == 0 { blinkTicks = 4 }
+    tickBubble()
     if activity == .sleep {
       pinStaticSleepZzz()
     } else {
@@ -563,9 +687,21 @@ import AppKit
       set(.sleep, seconds: 9_999)
       return
     }
-    // Don't pick a new wander while a friend is visiting or vibing to Spotify.
-    if hostingVisit || visitor?.isVisiting == true || isDanceMode {
-      set(.sit, seconds: 1)
+    // Don't pick a new wander mid-visit — hold the current gesture pose.
+    if hostingVisit || visitor?.isVisiting == true {
+      if activity == .eat || activity == .sleep || activity == .run
+          || activity == .walk || activity == .fly || activity == .glide
+      {
+        activityTicks = Int(1.2 * fps)
+      } else {
+        set(.sit, seconds: 1.2)
+      }
+      return
+    }
+    // Dance mode: pulseToBeat owns the choreography — don't reset to a dead sit loop.
+    if isDanceMode {
+      if activity == .fall || activity == .held { return }
+      activityTicks = Int(2 * fps)
       return
     }
     // Only non-sticky (idle) sleeps can auto-wake.
@@ -654,9 +790,11 @@ import AppKit
       set(.sleep, seconds: 9_999)
       return
     }
-    // Dance to Spotify on (and awake) → stay ready between tracks; no idle nap.
+    // Dance to Spotify on (and awake) → pulseToBeat drives the moves.
     if SpotifyDance.shared.enabled {
-      set(.sit, seconds: 2)
+      if activity != .fall, activity != .held {
+        set(.sit, seconds: 4)
+      }
       return
     }
     let hour = Calendar.current.component(.hour, from: Date())
@@ -670,7 +808,7 @@ import AppKit
       case .walk: 4...10
       case .run: 2.5...4.5
       case .fly: 5...11
-      case .glide: 5...10
+      case .glide: 8...16 // octopus: long, slow drifts
       case .sleep: 20...45
       default: 2.5...7
       }
@@ -679,21 +817,25 @@ import AppKit
     let vf = screenFrame()
     switch next {
     case .fly:
-      // Mostly side-to-side; occasional pure up/down climb.
-      wanderAxis = Int.random(in: 0..<5) == 0 ? .vertical : .horizontal
-      y = vf.minY + CGFloat.random(in: 70...130)
+      // Bird: restless — flip axes often, wider height band.
+      wanderAxis = Int.random(in: 0..<3) == 0 ? .vertical : .horizontal
+      y = vf.minY + CGFloat.random(in: 50...160)
       wanderLock = wanderAxis == .horizontal ? y : x
-      say(["chirp!", "↑ tweet", "wind~"].randomElement()!)
+      say(["SKY— wait", "↑!!", "ooh— fly", "zoom unfinished", "wind!!"].randomElement()!)
     case .glide:
       wanderAxis = Int.random(in: 0..<4) == 0 ? .vertical : .horizontal
       y = restFloor(in: vf) + (wanderAxis == .horizontal ? CGFloat.random(in: 0...20) : 0)
       wanderLock = wanderAxis == .horizontal ? y : x
-      if Bool.random() { say(["…", "bloop", "🫧"].randomElement()!) }
+      if Bool.random() {
+        say(["…watching", "hm.", "noted.", "🫧", "try harder"].randomElement()!)
+      }
     case .walk, .run:
       wanderAxis = .horizontal
       wanderLock = nil
       if case .run = next, species == .dog, Bool.random() {
-        say(["zoom!", "bark!", "🎾"].randomElement()!)
+        say(["soft zoomies", "easy run~", "come along?"].randomElement()!)
+      } else if case .walk = next, species == .bird, Bool.random() {
+        say(["can't sit!!", "hop hop— wait", "ground?? briefly"].randomElement()!)
       }
     default:
       wanderAxis = .horizontal
@@ -703,12 +845,12 @@ import AppKit
 
   private func speciesIdleOptions(sleepy: Bool) -> [(Activity, Int)] {
     switch species {
-    case .dog: // loyal energy — walk + occasional sprint
-      return [(.walk, 48), (.sit, 22), (.sleep, sleepy ? 35 : 5), (.run, happiness > 55 ? 16 : 4)]
-    case .bird: // lives in the air; ground is temporary
-      return [(.fly, 48), (.sit, 24), (.walk, 10), (.sleep, sleepy ? 25 : 4)]
-    case .octopus: // water creature — drift + rest, skip “walking”
-      return [(.glide, 50), (.sit, 28), (.sleep, sleepy ? 22 : 6)]
+    case .dog: // golden calm — sit + stroll, rare soft sprint
+      return [(.sit, 36), (.walk, 40), (.sleep, sleepy ? 38 : 8), (.run, happiness > 60 ? 8 : 2)]
+    case .bird: // ADHD air — fly dominates, almost never idle-sit
+      return [(.fly, 62), (.walk, 14), (.sit, 10), (.sleep, sleepy ? 20 : 3)]
+    case .octopus: // menace drift — observe (sit) then glide with intent
+      return [(.glide, 44), (.sit, 36), (.sleep, sleepy ? 24 : 5)]
     }
   }
 
@@ -828,13 +970,19 @@ import AppKit
   private var look: Look {
     let angry = angryTicks > 0
     let dancing = isDanceMode
-    let happy = !angry && (happyTicks > 0 || dancing || activity == .eat || activity == .run || activity == .fly)
+    let happy = !angry && (happyTicks > 0 || dancing || activity == .eat || activity == .run || activity == .fly || visitPawTicks > 0)
     var l = Look(species: species)
-    switch activity {
-    case .walk, .run, .fly: l.pose = .walk(walkFrame)
-    case .glide, .sit, .eat: l.pose = dancing && walkFrame == 1 ? .walk(1) : .sit
-    case .sleep: l.pose = .lie
-    case .held, .fall: l.pose = dancing ? .walk(walkFrame) : .hang
+    if visitPawTicks > 0, species == .dog || species == .octopus {
+      l.pose = .hang // raised paw / tentacle while petting a friend
+    } else if dancing, let pose = dancePoseOverride, dancePoseTicks > 0 {
+      l.pose = pose
+    } else {
+      switch activity {
+      case .walk, .run, .fly: l.pose = .walk(walkFrame)
+      case .glide, .sit, .eat: l.pose = .sit
+      case .sleep: l.pose = .lie
+      case .held, .fall: l.pose = dancing ? .walk(walkFrame) : .hang
+      }
     }
     // Don't blink-closed while dancing — reads as napping.
     if activity == .sleep || (blinkTicks > 0 && !angry && !dancing) {
@@ -847,7 +995,9 @@ import AppKit
       l.eyes = .open
     }
     l.tongue = !angry && (activity == .eat ? walkFrame == 0 : happy)
-    l.wag = activity == .sleep || angry ? 0 : tick / (happy || dancing || activity == .fly || activity == .glide ? 3 : 12) % 2
+    // Octopus tentacle bob stays lazy even when “happy.”
+    let wagFast = happy || dancing || activity == .fly || (activity == .glide && species != .octopus)
+    l.wag = activity == .sleep || angry ? 0 : tick / (wagFast ? 3 : (activity == .glide ? 18 : 12)) % 2
     return l
   }
 
@@ -867,17 +1017,38 @@ import AppKit
   }
 
   private func isOverDog(_ m: CGPoint) -> Bool {
-    let lx = m.x - window.frame.minX - spriteOrigin.x, ly = m.y - window.frame.minY - spriteOrigin.y
+    guard let (col, row) = canvasCell(at: m) else { return false }
+    return sprite.canvas[col, row] != nil
+  }
+
+  /// Canvas coords facing right (mirrors if the pet faces left).
+  private func canvasCell(at m: CGPoint) -> (col: Int, row: Int)? {
+    let lx = m.x - window.frame.minX - spriteOrigin.x
+    let ly = m.y - window.frame.minY - spriteOrigin.y
     var col = Int((lx / scale).rounded(.down))
     let row = Canvas.h - 1 - Int((ly / scale).rounded(.down))
     if dir < 0 { col = Canvas.w - 1 - col }
-    return Canvas.contains(col, row) && sprite.canvas[col, row] != nil
+    guard Canvas.contains(col, row) else { return nil }
+    return (col, row)
+  }
+
+  private func bodyPart(at m: CGPoint) -> BodyPart {
+    guard let (col, row) = canvasCell(at: m), sprite.canvas[col, row] != nil else {
+      return .body
+    }
+    return BodyPart.hit(species: species, col: col, row: row, head: sprite.head)
   }
 
   var headPoint: CGPoint {
     let col = 25.5 + CGFloat(sprite.head.x), row = 3 + CGFloat(sprite.head.y)
     let mirrored = dir < 0 ? CGFloat(Canvas.w) - col : col
     return CGPoint(x: spriteOrigin.x + mirrored * scale, y: spriteOrigin.y + (CGFloat(Canvas.h) - row) * scale)
+  }
+
+  private func tickBubble() {
+    guard bubbleTicks > 0 else { return }
+    bubbleTicks -= 1
+    if bubbleTicks == 0 { bubble = nil }
   }
 
   private func say(_ text: String, seconds: Double = 3.0, force: Bool = true) {
@@ -946,14 +1117,9 @@ import AppKit
     grabbing = true
     window.ignoresMouseEvents = false
 
-    // Double-click → nap if awake, wake if asleep (same as menu Nap / Wake up).
+    // Double-click → disappear (not nap). Show again from the menu-bar emoji.
     if clickCount >= 2 {
-      pendingPetWork?.cancel()
-      pendingPetWork = nil
-      swallowRelease = true
-      dragged = false
-      grabbing = false
-      toggleNap()
+      setHidden(true)
       return
     }
     swallowRelease = false
@@ -961,11 +1127,12 @@ import AppKit
     grabStart = m
     lastMouse = m
     grabOffset = CGPoint(x: x - m.x, y: y - m.y)
+    grabPart = bodyPart(at: m)
     throwVelocity = .zero
     dragged = false
     activity = .held
     activityTicks = Int(60 * fps)
-    logApp("grab_start")
+    logApp("grab_start", extra: ["part": grabPart.rawValue])
   }
 
   func drag() {
@@ -979,15 +1146,15 @@ import AppKit
       pendingPetWork = nil
       targetX = nil
       activity = .held // untilWoken kept — land() puts them back to sleep
-      logApp("drag_start")
-      if Bool.random() {
-        let line: String =
-          switch species {
-          case .dog: ["put me down!", "wheee~"].randomElement()!
-          case .bird: "not a kite!!"
-          case .octopus: "tentacles!!"
-          }
-        say(line)
+      logApp("drag_start", extra: ["part": grabPart.rawValue])
+      // Tail / tentacle / wing tug gets a sharper protest; otherwise occasional carry chatter.
+      let sensitive = grabPart == .tail || (species == .bird && grabPart == .limb)
+      if sensitive || Bool.random() {
+        sayFresh(PetLines.pull(species, grabPart), seconds: 2.4)
+        if sensitive {
+          angryTicks = max(angryTicks, Int(1.6 * fps))
+          emit(species == .octopus ? "🫧" : "💢", count: 2)
+        }
       }
     }
     throwVelocity = CGVector(dx: (m.x - lastMouse.x) * 1.5, dy: (m.y - lastMouse.y) * 1.5)
@@ -1000,20 +1167,31 @@ import AppKit
 
   func release(clickCount: Int = 1) {
     grabbing = false
-    if swallowRelease {
+    if swallowRelease || hidden {
       swallowRelease = false
       return
     }
     if !dragged {
-      // Defer pet so a following second click can become nap/wake instead.
+      let now = ProcessInfo.processInfo.systemUptime
+      // Double-click (system count or two quick click-ups) → hide, never nap.
+      if clickCount >= 2 || (lastClickReleaseAt > 0 && now - lastClickReleaseAt <= NSEvent.doubleClickInterval) {
+        lastClickReleaseAt = 0
+        pendingPetWork?.cancel()
+        pendingPetWork = nil
+        setHidden(true)
+        return
+      }
+      lastClickReleaseAt = now
+      // Defer body-touch so a second click can hide instead.
       pendingPetWork?.cancel()
+      let part = grabPart
       let work = DispatchWorkItem { [weak self] in
         self?.pendingPetWork = nil
-        self?.pet()
+        guard let self, !self.hidden else { return }
+        self.touchBody(part)
       }
       pendingPetWork = work
-      let delay = NSEvent.doubleClickInterval
-      DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+      DispatchQueue.main.asyncAfter(deadline: .now() + NSEvent.doubleClickInterval, execute: work)
       return
     }
     // Dropped at a screen edge → tuck in for a nap.
@@ -1083,7 +1261,7 @@ import AppKit
     activityTicks = Int(2 * fps)
   }
 
-  /// Feed / play / pet / poke should get them out of a sticky nap.
+  /// Play / talk / poke should get them out of a sticky nap.
   @discardableResult
   private func wakeIfNapping() -> Bool {
     guard untilWoken || activity == .sleep else { return false }
@@ -1093,28 +1271,72 @@ import AppKit
 
   // MARK: Actions
 
-  private func pet() {
+  /// Single-click on a body part — different words / mood per nose, head, tail…
+  private func touchBody(_ part: BodyPart) {
     noteUserTouch()
-    logApp("self_pet")
+    logApp("self_touch", extra: ["part": part.rawValue])
     _ = wakeIfNapping()
-    happiness = min(100, happiness + 6)
-    happyTicks = Int(2.5 * fps)
-    switch species {
-    case .dog:
-      emit("❤️", count: 4)
-      sayFresh(PetLines.pet(.dog))
-      hop()
-    case .bird:
-      emit("✨", count: 3)
-      sayFresh(PetLines.pet(.bird))
-      y = restFloor(in: screenFrame()) + 10
-      set(.fly, seconds: 2.5) // happy flutter
-    case .octopus:
-      emit("🫧", count: 3)
-      sayFresh(PetLines.pet(.octopus))
-      set(.glide, seconds: 3)
+
+    let likes =
+      part == .head || part == .ear || part == .belly || part == .body
+    let dislikes = part == .nose
+    let wary = part == .tail || part == .limb
+
+    if likes {
+      happiness = min(100, happiness + 6)
+      happyTicks = Int(2.6 * fps)
+      angryTicks = 0
+    } else if dislikes {
+      happiness = max(0, happiness - 1)
+      angryTicks = max(angryTicks, Int(1.4 * fps))
+      happyTicks = 0
+    } else if wary {
+      happiness = min(100, happiness + 1)
+      happyTicks = Int(1.2 * fps)
     }
+
+    sayFresh(PetLines.touch(species, part), seconds: 2.8)
+
+    switch (species, part) {
+    case (.dog, .nose):
+      emit("💢", count: 1)
+      set(.sit, seconds: 1.8)
+    case (.dog, .head), (.dog, .ear), (.dog, .belly), (.dog, .body):
+      emit("❤️", count: likes ? 3 : 1)
+      hop()
+    case (.dog, .tail), (.dog, .limb):
+      emit("✨", count: 1)
+      set(.sit, seconds: 1.6)
+
+    case (.bird, .nose):
+      emit("💢", count: 1)
+      y = restFloor(in: screenFrame()) + 14
+      set(.fly, seconds: 1.8)
+    case (.bird, .head), (.bird, .ear), (.bird, .belly), (.bird, .body):
+      emit("✨", count: 3)
+      y = restFloor(in: screenFrame()) + 10
+      set(.fly, seconds: 2.4)
+    case (.bird, .limb), (.bird, .tail):
+      emit("🪶", count: 1)
+      set(.sit, seconds: 1.6)
+
+    case (.octopus, .nose):
+      emit("🫧", count: 1)
+      set(.sit, seconds: 1.8)
+    case (.octopus, .head), (.octopus, .ear), (.octopus, .belly), (.octopus, .body):
+      emit("🫧", count: 2)
+      if likes { emit("❤️", count: 1) }
+      set(.glide, seconds: 2.6)
+    case (.octopus, .tail), (.octopus, .limb):
+      emit("🫧", count: 2)
+      set(.sit, seconds: 1.8)
+    }
+
     pushOnline()
+  }
+
+  private func pet() {
+    touchBody(.body)
   }
 
   @objc private func feed() {
@@ -1214,6 +1436,7 @@ import AppKit
     noteUserTouch()
     Online.shared.setActive(code: code)
     logApp("menu_friend_\(action)", code: code, targetName: name)
+    Online.shared.noteInteraction(code: code, direction: .sent)
     if !Online.shared.appearOnline {
       say("turn on “Friends can visit” first", seconds: 2.5)
       // Still play the local visit preview on your screen.
@@ -1255,6 +1478,7 @@ import AppKit
     if lastVisitKey == key, now - lastVisitAt < 2.8 { return }
     lastVisitKey = key
     lastVisitAt = now
+    Online.shared.noteInteraction(code: visitCode, direction: .received)
     logApp(
       "visit_received_\(action)", code: visitCode, targetName: visitName,
       extra: ["fromSpecies": visitSpecies.rawValue])
@@ -1297,11 +1521,24 @@ import AppKit
     v.hostSpecies = { [weak self] in self?.species ?? .dog }
     visitor = v
     v.onPlayWithHost = { [weak self] in
-      // In-place play — don't sprint across the screen away from the guest.
+      // In-place play — species-specific, don't sprint off-screen.
       guard let self else { return }
-      self.happyTicks = Int(2.5 * fps)
-      self.hop()
-      self.emit("🎾", count: 2)
+      self.happyTicks = Int(4.5 * fps)
+      switch self.species {
+      case .dog:
+        self.set(.run, seconds: 4.5)
+        self.hop()
+        self.emit("🎾", count: 2)
+        self.emit("💨", count: 1)
+      case .bird:
+        self.set(.fly, seconds: 4.5)
+        self.emit("🪶", count: 2)
+        self.emit("✨", count: 1)
+      case .octopus:
+        self.set(.glide, seconds: 4.5)
+        self.emit("🫧", count: 2)
+        self.emit("🌊", count: 1)
+      }
     }
     v.onGestureStart = { [weak self] in
       guard let self else { return }
@@ -1311,28 +1548,28 @@ import AppKit
         self.bubbleTicks = 0
       }
       if role == .incomingActor, deferHostReaction {
-        // We *receive* their action — eat when fed, etc. (our species).
+        // We *receive* their action — distinct reaction per verb.
         if action == "play" {
           self.happiness = min(100, self.happiness + 12)
-          self.happyTicks = Int(2.5 * fps)
-          self.hop()
+          // onPlayWithHost owns the motion
         } else if action == "poke" {
           if self.untilWoken || self.activity == .sleep { self.wakeStickyNap() }
           self.happiness = max(0, self.happiness - 8)
-          self.angryTicks = Int(0.9 * fps)
+          self.angryTicks = Int(2.6 * fps)
+          // Recoil hop then mad glare — not a happy sit.
           self.hop()
-        } else if action == "pet" {
-          self.happiness = min(100, self.happiness + 6)
-          self.happyTicks = Int(1.2 * fps)
-          self.hop()
-        } else if action == "feed" {
-          self.fullness = min(100, self.fullness + 35)
-          self.happiness = min(100, self.happiness + 4)
-          self.set(.eat, seconds: 2.4)
-          self.happyTicks = Int(2.4 * fps)
-          self.emit(FriendVisitor.foodEmoji(self.species), count: 3)
-        } else if action == "nap" {
-          self.enterNap(sayLine: false)
+          switch self.species {
+          case .dog: self.set(.walk, seconds: 2.6)
+          case .bird: self.set(.fly, seconds: 2.6)
+          case .octopus: self.set(.glide, seconds: 2.6)
+          }
+          self.emit("💢", count: 2)
+        } else if action == "talk" {
+          self.happiness = min(100, self.happiness + 5)
+          self.happyTicks = Int(4.0 * fps)
+          self.set(.sit, seconds: 4.0)
+          self.emit("💬", count: 2)
+          self.sayFresh(PetLines.talk(self.species))
         } else {
           self.playRemote(action)
         }
@@ -1353,7 +1590,7 @@ import AppKit
     }
     // Belt-and-suspenders: force-dismiss if a visit stalls.
     let visitCode = code
-    let forceAfter: TimeInterval = action == "poke" ? 2.2 : 5.0
+    let forceAfter: TimeInterval = action == "poke" ? 5.0 : 10.0
     DispatchQueue.main.asyncAfter(deadline: .now() + forceAfter) { [weak self] in
       guard let self, self.visitor?.code == visitCode || self.hostingVisit else { return }
       self.hostingVisit = false
@@ -1363,41 +1600,71 @@ import AppKit
     }
     // Outgoing: one line on *you*. Incoming: visitor already has the only bubble.
     if role == .outgoingTarget {
-      say(label, seconds: action == "poke" ? 0.7 : 1.4)
+      say(label, seconds: action == "poke" ? 2.6 : 2.8)
     } else {
       bubble = nil
       bubbleTicks = 0
     }
   }
 
-  /// You are the actor on an outgoing visit — offer / pet / poke *them*.
-  /// Food and reactions use `friendSpecies` (the pad you’re acting on).
+  /// You are the actor on an outgoing visit — poke / play / talk with them.
   private func performHostSideVisit(action: String, friendSpecies: Species) {
     // Face the visitor.
     if let side = visitor?.visitSide { dir = side }
     switch action {
-    case "pet":
-      happyTicks = Int(2.2 * fps)
-      emit("❤️", count: 3)
-      hop()
-      set(.sit, seconds: 2.2)
     case "poke":
-      emit("💢", count: 2)
+      angryTicks = Int(2.6 * fps)
+      emit("💢", count: 3)
       hop()
-      set(.sit, seconds: 0.8)
-    case "feed":
-      // Extend *their* food to them — you don’t eat it.
-      happyTicks = Int(2.2 * fps)
-      set(.sit, seconds: 2.2)
-      hop()
-      emit(FriendVisitor.foodEmoji(friendSpecies), count: 3)
+      // Lunge, don’t sit politely.
+      switch species {
+      case .dog: set(.walk, seconds: 2.6)
+      case .bird: set(.fly, seconds: 2.6)
+      case .octopus: set(.glide, seconds: 2.6)
+      }
+      visitPawTicks = Int(0.7 * fps)
     case "play":
-      break // kicked off together via visitor onPlayWithHost
-    case "nap":
-      emit("💤", count: 2)
-      set(.sit, seconds: 2.0)
+      // Kick off our side of play (visitor also hops via onPlayWithHost).
+      happyTicks = Int(4.5 * fps)
+      switch species {
+      case .dog:
+        set(.run, seconds: 4.5)
+        hop()
+        emit("🎾", count: 2)
+      case .bird:
+        set(.fly, seconds: 4.5)
+        emit("🪶", count: 2)
+      case .octopus:
+        set(.glide, seconds: 4.5)
+        emit("🫧", count: 2)
+      }
+    case "talk":
+      happyTicks = Int(4.0 * fps)
+      set(.sit, seconds: 4.0)
+      emit("💬", count: 2)
+      sayFresh(PetLines.talk(species))
     default:
       break
+    }
+  }
+
+  /// Float food from your pad toward the guest (handoff, not “I eat you”).
+  private func emitTowardVisitor(_ text: String, count: Int = 2) {
+    guard let side = visitor?.visitSide else {
+      emit(text, count: count)
+      return
+    }
+    let head = headPoint
+    let n = min(count, 3)
+    for i in 0..<n {
+      particles.append(
+        Particle(
+          text: text,
+          pos: CGPoint(x: head.x + side * 14, y: head.y - 2 + CGFloat(i) * 7),
+          vel: CGVector(
+            dx: side * CGFloat.random(in: 1.4...2.0),
+            dy: CGFloat.random(in: 0.15...0.55)),
+          life: 55, maxLife: 55))
     }
   }
 
@@ -1405,24 +1672,23 @@ import AppKit
     actor: String, action: String, toward: String, incoming: Bool
   ) -> String {
     let a = actor.isEmpty ? "friend" : actor
+    let raw: String
     if incoming {
-      return switch action {
-      case "feed": "\(a) feeds you 🍖"
+      raw = switch action {
       case "play": "\(a) wants to play 🎾"
-      case "pet": "\(a) pats you ❤️"
-      case "nap": "\(a) tucks you in 💤"
       case "poke": "\(a) pokes you 💢"
+      case "talk": "\(a) says hi 💬"
       default: "\(a) → \(action)"
       }
+    } else {
+      raw = switch action {
+      case "play": "I play with \(toward) 🎾"
+      case "poke": "I poke \(toward) 💢"
+      case "talk": "I talk with \(toward) 💬"
+      default: "→ \(toward)"
+      }
     }
-    return switch action {
-    case "feed": "I feed \(toward) 🍖"
-    case "play": "I play with \(toward) 🎾"
-    case "pet": "I pat \(toward) ❤️"
-    case "nap": "I tuck \(toward) in 💤"
-    case "poke": "I poke \(toward) 💢"
-    default: "→ \(toward)"
-    }
+    return Online.tidyPossessiveLabel(raw)
   }
 
   private func syncVisitorFromFriends() {
@@ -1447,13 +1713,6 @@ import AppKit
     render()
   }
 
-  @objc private func friendFeed(_ sender: NSMenuItem) {
-    guard let code = sender.representedObject as? String,
-          let name = Online.shared.friends.first(where: { $0.code == code })?.partnerName
-    else { return }
-    sendToFriend(action: "feed", code: code, name: name)
-  }
-
   @objc private func friendPlay(_ sender: NSMenuItem) {
     guard let code = sender.representedObject as? String,
           let name = Online.shared.friends.first(where: { $0.code == code })?.partnerName
@@ -1461,18 +1720,18 @@ import AppKit
     sendToFriend(action: "play", code: code, name: name)
   }
 
-  @objc private func friendPet(_ sender: NSMenuItem) {
-    guard let code = sender.representedObject as? String,
-          let name = Online.shared.friends.first(where: { $0.code == code })?.partnerName
-    else { return }
-    sendToFriend(action: "pet", code: code, name: name)
-  }
-
   @objc private func friendPoke(_ sender: NSMenuItem) {
     guard let code = sender.representedObject as? String,
           let name = Online.shared.friends.first(where: { $0.code == code })?.partnerName
     else { return }
     sendToFriend(action: "poke", code: code, name: name)
+  }
+
+  @objc private func friendTalk(_ sender: NSMenuItem) {
+    guard let code = sender.representedObject as? String,
+          let name = Online.shared.friends.first(where: { $0.code == code })?.partnerName
+    else { return }
+    sendToFriend(action: "talk", code: code, name: name)
   }
 
   /// Top-level poke — aims at the selected friend.
@@ -1491,19 +1750,22 @@ import AppKit
     return m
   }
 
-  @objc private func friendNap(_ sender: NSMenuItem) {
-    guard let code = sender.representedObject as? String,
-          let name = Online.shared.friends.first(where: { $0.code == code })?.partnerName
-    else { return }
-    sendToFriend(action: "nap", code: code, name: name)
-  }
-
-  @objc private func petFromMenu() { pet() }
-
   @objc private func pokeSelf() {
     noteUserTouch()
     logApp("self_poke")
     getAngry(fromPoke: true)
+    pushOnline()
+  }
+
+  @objc private func talkSelf() {
+    noteUserTouch()
+    logApp("self_talk")
+    _ = wakeIfNapping()
+    happiness = min(100, happiness + 4)
+    happyTicks = Int(2.8 * fps)
+    set(.sit, seconds: 2.8)
+    emit("💬", count: 2)
+    sayFresh(PetLines.talk(species))
     pushOnline()
   }
 
@@ -1590,21 +1852,21 @@ import AppKit
     noteUserTouch()
     if let user = prompt(
       "Username",
-      message: "Your name (e.g. Viv Test). Friends see “Username’s Pad” — like Viv Test’s Zuzu.",
+      message: "Your name (e.g. Viv Test). Friends see “Username’s Pet” — like Viv Test’s Zuzu. Names ending in s use a trailing apostrophe (Ivars’ Zuzu).",
       placeholder: Online.shared.ownerName),
        !user.isEmpty
     {
       Online.shared.ownerName = user
       logApp("rename_owner", extra: ["owner": user])
     }
-    if let pad = prompt(
-      "Pad name",
-      message: "Name of this pad. Defaults: Zuzu (dog), Puff (bird), Bloop (octopus).",
+    if let pet = prompt(
+      "Pet name",
+      message: "Your pet’s name. Defaults: Zuzu (dog), Puff (bird), Bloop (octopus).",
       placeholder: Online.shared.padName),
-       !pad.isEmpty
+       !pet.isEmpty
     {
-      Online.shared.padName = pad
-      logApp("rename_pad", extra: ["pad": pad])
+      Online.shared.padName = pet
+      logApp("rename_pad", extra: ["pad": pet])
     }
     refreshStatusItem()
     say("hi! i'm \(Online.shared.displayName)", seconds: 3)
@@ -1677,8 +1939,13 @@ import AppKit
   func menuNeedsUpdate(_ menu: NSMenu) {
     menu.removeAllItems()
 
-    // --- This pad: identity → pet → presence → stats (no checkmarks / no grey mush) ---
-    menu.addItem(item("My username / pad…", #selector(onlineSetName), symbol: "pencil"))
+    if hidden {
+      menu.addItem(item("Show \(Online.shared.padName)…", #selector(showPet), symbol: "eye"))
+      menu.addItem(.separator())
+    }
+
+    // --- Identity → pet → presence → stats ---
+    menu.addItem(item("My username / pet name…", #selector(onlineSetName), symbol: "pencil"))
     if !hidden {
       let speciesItem = NSMenuItem(title: "Choose pet…", action: nil, keyEquivalent: "")
       speciesItem.image = menuSymbol("pawprint")
@@ -1696,7 +1963,7 @@ import AppKit
       speciesItem.submenu = speciesMenu
       menu.addItem(speciesItem)
     }
-    // Pad card: name + meters + “Friends can visit” — companion HUD, not Status: Offline.
+    // Card: name + meters + presence dot
     let card = PadMenuCard(frame: NSRect(x: 0, y: 0, width: 248, height: 72))
     card.configure(
       emoji: species.emoji,
@@ -1713,21 +1980,32 @@ import AppKit
 
     if !hidden {
       menu.addItem(.separator())
-      menu.addItem(item("💢  Poke", #selector(pokeSelf)))
-      menu.addItem(item("🍖  Feed", #selector(feed)))
-      menu.addItem(item("🎾  Play", #selector(play)))
-      menu.addItem(item("❤️  Pet", #selector(petFromMenu)))
+      // Care actions tucked away — keeps the top-level menu short for first-timers.
+      let careItem = NSMenuItem(title: "Care…", action: nil, keyEquivalent: "")
+      careItem.image = menuSymbol("heart")
+      let careMenu = NSMenu()
+      careMenu.addItem(item("💢  Poke", #selector(pokeSelf)))
+      careMenu.addItem(item("🎾  Play", #selector(play)))
+      careMenu.addItem(item("💬  Talk", #selector(talkSelf)))
       let danceItem = item(
         SpotifyDance.shared.enabled ? "🎵  Stop dance" : "🎵  Dance to Spotify",
         #selector(toggleDanceToSpotify))
       if !SpotifyDance.shared.isAvailable { danceItem.isEnabled = false }
-      menu.addItem(danceItem)
-      menu.addItem(item(isAsleep ? "☀️  Wake up" : "💤  Nap", #selector(toggleNap)))
+      careMenu.addItem(danceItem)
+      careMenu.addItem(item(isAsleep ? "☀️  Wake up" : "💤  Nap", #selector(toggleNap)))
+      careItem.submenu = careMenu
+      menu.addItem(careItem)
     }
 
     // --- Friends & bonds ---
     menu.addItem(.separator())
-    let friends = Online.shared.friends
+    let friends = Online.shared.friends.sorted { a, b in
+      // Closest bonds float up; waiting invites sink.
+      if a.waiting != b.waiting { return !a.waiting && b.waiting }
+      if a.togetherCount != b.togetherCount { return a.togetherCount > b.togetherCount }
+      if a.online != b.online { return a.online && !b.online }
+      return a.partnerName.localizedCaseInsensitiveCompare(b.partnerName) == .orderedAscending
+    }
     let onlineN = friends.filter { $0.online && !$0.waiting }.count
     let friendsItem = NSMenuItem(
       title: "Friends (\(friends.count) · \(onlineN) online)",
@@ -1739,8 +2017,12 @@ import AppKit
     } else {
       for f in friends {
         let mark = f.waiting ? "⏳" : (f.online ? "🟢" : "⚪️")
-        let label = f.waiting ? "code \(f.code)" : shortFriendName(f.partnerName)
-        let row = NSMenuItem(title: "\(mark)  \(label)", action: nil, keyEquivalent: "")
+        let label = f.waiting
+          ? "code \(f.code)"
+          : shortFriendName(Online.tidyPossessiveLabel(f.partnerName))
+        // Heart sits between presence and name for close bonds.
+        let heart = (!f.waiting ? f.bondHeart.map { "\($0) " } : nil) ?? ""
+        let row = NSMenuItem(title: "\(mark)  \(heart)\(label)", action: nil, keyEquivalent: "")
         if f.code == Online.shared.activeCode { row.state = .on }
         let person = NSMenu()
 
@@ -1749,17 +2031,18 @@ import AppKit
           person.addItem(info("Code \(f.code)"))
         } else {
           person.addItem(info("\(f.petSpecies.emoji)  \(f.petSpecies.defaultName)  ·  full \(Int(f.fullness))%  ·  happy \(Int(f.happiness))%"))
+          if let together = f.togetherLabel {
+            person.addItem(info(together))
+          }
           if let act = friendlyActivity(f.lastActivity) {
             person.addItem(info(act))
           }
           person.addItem(.separator())
 
           for (title, sel) in [
-            ("🍖  Feed", #selector(friendFeed(_:))),
-            ("🎾  Play", #selector(friendPlay(_:))),
-            ("❤️  Pet", #selector(friendPet(_:))),
             ("💢  Poke", #selector(friendPoke(_:))),
-            ("💤  Tuck in", #selector(friendNap(_:))),
+            ("🎾  Play", #selector(friendPlay(_:))),
+            ("💬  Talk", #selector(friendTalk(_:))),
           ] as [(String, Selector)] {
             let m = item(title, sel)
             m.representedObject = f.code
@@ -1795,10 +2078,42 @@ import AppKit
     menu.addItem(bondsItem)
 
     menu.addItem(item("Check for updates…", #selector(checkForUpdates), symbol: "arrow.triangle.2.circlepath"))
+    menu.addItem(item("Send feedback…", #selector(sendFeedback), symbol: "text.bubble"))
 
     // --- Quit alone ---
     menu.addItem(.separator())
     menu.addItem(item("Quit", #selector(quit), symbol: "xmark.circle"))
+  }
+
+  @objc private func sendFeedback() {
+    noteUserTouch()
+    let alert = NSAlert()
+    alert.messageText = "Send feedback"
+    alert.informativeText = "What’s working, what’s weird, what you wish CoPet did — we’ll save it."
+    alert.addButton(withTitle: "Send")
+    alert.addButton(withTitle: "Cancel")
+    let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 72))
+    field.placeholderString = "Type a note…"
+    field.stringValue = ""
+    // Multi-line-ish: tall field is fine for short feedback.
+    alert.accessoryView = field
+    NSApp.activate(ignoringOtherApps: true)
+    guard alert.runModal() == .alertFirstButtonReturn else { return }
+    let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !text.isEmpty else {
+      say("empty note ✏️", seconds: 1.5)
+      return
+    }
+    logApp("feedback_submit", extra: ["length": text.count])
+    Online.shared.submitFeedback(text) { [weak self] ok in
+      Task { @MainActor in
+        if ok {
+          self?.say("thanks for the note 💌", seconds: 2.2)
+        } else {
+          self?.say("couldn’t send — try again later", seconds: 2.5)
+        }
+      }
+    }
   }
 
   @objc private func toggleDanceToSpotify() {
@@ -1823,12 +2138,12 @@ import AppKit
       logApp("spotify_dance_off")
       return
     }
-    // Same as Feed / Play / Pet — dance ends a nap; no separate Wake up needed.
+    // Same as Play / Talk — dance ends a nap; no separate Wake up needed.
     _ = wakeIfNapping()
     let a = NSAlert()
     a.messageText = "Dance to Spotify?"
     a.informativeText =
-      "Same as Feed or Play — but for music. Mochi listens only to the Spotify desktop app and dances on the beat. Speakers or Bluetooth headphones both work. Allow audio capture (and Spotify Automation) if macOS asks."
+      "Same as Play — but for music. Mochi listens only to the Spotify desktop app and dances on the beat. Speakers or Bluetooth headphones both work. Allow audio capture (and Spotify Automation) if macOS asks."
     a.addButton(withTitle: "Dance")
     a.addButton(withTitle: "Cancel")
     NSApp.activate(ignoringOtherApps: true)
@@ -1870,9 +2185,7 @@ import AppKit
     if dance.enabled { dance.start() }
   }
 
-  /// Pulse on the locked beat grid. Sleep fully blocks this.
-  /// Most beats = quick squash (reads on tempo). Bigger hops only on accents
-  /// so the pet can land before the next kick — otherwise it looks off-beat.
+  /// Pulse on the locked beat grid. Mix of poses + hops — not sit↔stand forever.
   private func pulseToBeat() {
     guard SpotifyDance.shared.enabled, !hidden, !grabbing, !menuIsOpen else { return }
     guard !untilWoken, activity != .sleep else { return }
@@ -1882,7 +2195,6 @@ import AppKit
     lastBeatPulse = now
     dancingToSpotify = true
     happyTicks = max(happyTicks, Int(0.45 * fps))
-    walkFrame ^= 1
     danceStep += 1
     let strength = lastBeatStrength
     let accent = strength >= 0.85 || danceStep % 4 == 1
@@ -1892,33 +2204,86 @@ import AppKit
     let floorY = restFloor(in: screenFrame())
     let grounded = activity != .held && activity != .fall && y <= floorY + 3
     danceStretch = false
-
-    // Always bob with the kick.
     squashTicks = max(squashTicks, accent ? 9 : 6)
 
-    if accent, grounded {
-      // Cycle a few accent moves — still on the downbeat.
-      switch danceStep % 8 {
-      case 1:
-        startFall(vx: 0, vy: 5.5)
-      case 3:
-        startFall(vx: dir * 2.0, vy: 5.0)
-      case 5:
-        danceStretch = true
-        squashTicks = max(squashTicks, 10)
-        startFall(vx: 0, vy: 6.5)
-      case 7:
-        dir = -dir
-        startFall(vx: dir * 1.8, vy: 5.2)
-      default:
-        break
-      }
-    }
+    // Rotating move catalog — different every beat, accents get bigger ones.
+    applyDanceMove(step: danceStep, accent: accent, grounded: grounded)
 
     if accent, Int.random(in: 0..<6) == 0 {
       say(["🎵", "🎶", "♪~"].randomElement()!, seconds: 0.9, force: false)
     }
     render()
+  }
+
+  /// Hold a dance pose for a few frames (overrides sit/walk flicker).
+  private func holdDancePose(_ pose: Pose, beats: Double = 0.35) {
+    dancePoseOverride = pose
+    dancePoseTicks = max(dancePoseTicks, Int(beats * fps))
+  }
+
+  private func applyDanceMove(step: Int, accent: Bool, grounded: Bool) {
+    // Species-flavored catalogs so dog isn’t only sit/stand.
+    let moves: [Int] =
+      switch species {
+      case .dog: [0, 1, 2, 3, 4, 5, 6, 7, 1, 8, 2, 4]
+      case .bird: [0, 9, 2, 10, 3, 9, 5, 10]
+      case .octopus: [0, 11, 2, 12, 4, 11, 5, 12]
+      }
+    let move = moves[step % moves.count]
+    walkFrame = step % 2
+
+    switch move {
+    case 0: // bob
+      holdDancePose(.sit, beats: 0.28)
+    case 1: // strut
+      holdDancePose(.walk(walkFrame), beats: 0.4)
+      if accent, grounded { startFall(vx: dir * 1.2, vy: 4.2) }
+    case 2: // spin face
+      dir = -dir
+      holdDancePose(.walk(1), beats: 0.32)
+    case 3: // hop
+      holdDancePose(.hang, beats: 0.25)
+      if grounded { startFall(vx: 0, vy: accent ? 6.2 : 4.5) }
+    case 4: // stretch pose
+      danceStretch = true
+      squashTicks = max(squashTicks, 11)
+      holdDancePose(.sit, beats: 0.45)
+    case 5: // side hop
+      holdDancePose(.walk(0), beats: 0.3)
+      if grounded { startFall(vx: dir * (accent ? 2.4 : 1.5), vy: accent ? 5.5 : 4.0) }
+    case 6: // paw up
+      holdDancePose(.hang, beats: 0.55)
+      if accent { emit("✨") }
+    case 7: // play bow / low
+      holdDancePose(.lie, beats: 0.4)
+      if accent, grounded { startFall(vx: 0, vy: 3.8) }
+    case 8: // double bounce
+      holdDancePose(.walk(1), beats: 0.35)
+      if grounded {
+        startFall(vx: dir * 0.8, vy: 5.8)
+      }
+    case 9: // bird flutter
+      holdDancePose(.walk(walkFrame), beats: 0.35)
+      y = floorAbove(6 + CGFloat(step % 3) * 4)
+      if accent { startFall(vx: dir * 1.4, vy: 5.0) }
+    case 10: // bird hover then drop
+      holdDancePose(.hang, beats: 0.3)
+      y = floorAbove(18)
+      if accent, grounded { startFall(vx: dir * 1.0, vy: 4.8) }
+    case 11: // octopus wave
+      holdDancePose(.hang, beats: 0.5)
+      if accent { emit("🫧") }
+    case 12: // octopus drift step (keep it lazy)
+      holdDancePose(.sit, beats: 0.45)
+      x += dir * (accent ? 1.2 : 0.6)
+      if accent, grounded { startFall(vx: dir * 0.5, vy: 2.2) }
+    default:
+      holdDancePose(.sit, beats: 0.25)
+    }
+  }
+
+  private func floorAbove(_ dy: CGFloat) -> CGFloat {
+    restFloor(in: screenFrame()) + dy
   }
 
   @objc private func checkForUpdates() {

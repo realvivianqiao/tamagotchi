@@ -18,9 +18,17 @@ The zip is **ad-hoc signed** (not Apple Developer ID). Friends may see “Apple 
 v0.4+ uses [Sparkle](https://sparkle-project.org) with EdDSA-signed `appcast.xml`. Friends download once; then updates install in-app. See [docs/SPARKLE.md](docs/SPARKLE.md). **Back up `secrets/sparkle_eddsa_private.key` — never commit it.**
 
 ## Where data lives
-- **Supabase** (source of truth across Render sleeps/redeploys): `mochi_players` + `mochi_bonds`. See `supabase/schema.sql`.
-- **On each Mac**: UserDefaults cache + stable `deviceId` (one device = one pad).
+- **Supabase** (not Firebase) — source of truth across Render sleeps/redeploys. See `supabase/schema.sql` and `supabase/analytics_tables.sql`.
+  - `mochi_users` — one Mac (`device_id`) = one user = one permanent `share_code` for all pets on that pad
+  - `mochi_user_changelog` — timestamped renames / species / share-code changes
+  - `mochi_players` + `mochi_bonds` — live profile + current bindings
+  - `mochi_binding_events` — historical bond claim / remove / rename
+  - `mochi_events` — every interaction (feed, visit, menu, dance, …)
+  - `mochi_feedback` — notes from menu → **Send feedback…**
+- **On each Mac**: UserDefaults cache + stable `deviceId` (one device = one pad; dog/bird/octopus share the same share code).
 - **Render**: realtime WebSocket only — set `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` so bonds survive idle sleep.
+
+Run `supabase/analytics_tables.sql` once in the Supabase SQL editor if those tables aren’t there yet.
 
 ## Dev
 ```bash

@@ -54,7 +54,7 @@ import AppKit
   private(set) var visitSide: CGFloat = 1
   /// Absolute deadline — visit never lingers past this.
   private var visitDeadline: Date?
-  private let visitMaxSeconds: TimeInterval = 4.5
+  private let visitMaxSeconds: TimeInterval = 9.0
 
   var hostX: (() -> CGFloat)?
   var hostY: (() -> CGFloat)?
@@ -139,7 +139,7 @@ import AppKit
     window.close()
   }
 
-  /// ≤4.5s visit: appear beside host → gesture → leave. Never idles on screen.
+  /// Appear beside host → gesture → fade out in place (no run-away).
   func beginVisit(
     action: String,
     label: String,
@@ -155,7 +155,7 @@ import AppKit
     playKickoffSent = false
     onVisitDone = onDone
     untilWoken = false
-    let maxSec: TimeInterval = visitAction == "poke" ? 2.0 : visitMaxSeconds
+    let maxSec: TimeInterval = visitAction == "poke" ? 4.2 : visitMaxSeconds
     visitDeadline = Date().addingTimeInterval(maxSec)
     // Incoming: one bubble on the visitor (who + what). Outgoing: speech on host only.
     showNameplate = false
@@ -164,7 +164,7 @@ import AppKit
     bubbleTicks = 0
     particles.removeAll()
     if role == .incomingActor {
-      say(label, seconds: visitAction == "poke" ? 0.9 : 1.6)
+      say(label, seconds: visitAction == "poke" ? 2.8 : 3.0)
     }
     startTimer()
     snapBesideHost()
@@ -196,22 +196,8 @@ import AppKit
   func play(_ action: String) {
     if isVisiting { return }
     switch action {
-    case "feed":
-      set(.eat, seconds: 3)
-      emit("🍖")
-      sayFresh(PetLines.feed(species, secondBreakfast: false))
     case "play":
       signaturePlay(seconds: 5)
-    case "pet":
-      happyTicks = Int(2.5 * fps)
-      angryTicks = 0
-      emit("❤️", count: 3)
-      sayFresh(PetLines.pet(species))
-      if activity != .sleep { hop() }
-    case "nap":
-      untilWoken = true
-      set(.sleep, seconds: 9_999)
-      sayFresh(["zzz…", "nap time", "night night", "💤", "tucked in", "soft…", "dreaming…", "zzz", "cozy", "sleep mode"])
     case "poke":
       untilWoken = false
       happyTicks = 0
@@ -219,6 +205,12 @@ import AppKit
       signaturePlayAngry(seconds: 2.5)
       emit("💢", count: 3)
       sayFresh(PetLines.poke(species))
+    case "talk":
+      happyTicks = Int(3 * fps)
+      angryTicks = 0
+      set(.sit, seconds: 3.2)
+      emit("💬", count: 2)
+      sayFresh(PetLines.talk(species))
     default:
       break
     }
@@ -302,7 +294,7 @@ import AppKit
   }
 
   private func stepVisit() {
-    // Hard cap — never linger past ~4.5s even if a phase stalls.
+    // Hard cap — never linger past the deadline even if a phase stalls.
     if let deadline = visitDeadline, Date() >= deadline {
       finishVisit()
       return
@@ -321,33 +313,27 @@ import AppKit
         visitTicks = 0
         bubble = nil
         bubbleTicks = 0
-        dir = visitSide
-        let leaveSec = visitAction == "poke" ? 0.25 : 0.5
-        switch species {
-        case .dog: set(.run, seconds: leaveSec)
-        case .bird: set(.fly, seconds: leaveSec)
-        case .octopus: set(.glide, seconds: leaveSec)
-        }
+        set(.sit, seconds: 0.5)
       }
 
-    default: // tiny step away, then gone
-      let leaveTicks = visitAction == "poke" ? Int(0.28 * fps) : Int(0.45 * fps)
-      x += visitSide * (visitAction == "poke" ? 12 : 8)
-      if species == .bird { y += 1.6 }
-      if visitTicks > leaveTicks {
+    default: // fade out in place — never sprint / fly away
+      snapBesideHost()
+      let fadeTicks = Int(0.4 * fps)
+      window.alphaValue = max(0, 1 - CGFloat(visitTicks) / CGFloat(max(1, fadeTicks)))
+      if visitTicks > fadeTicks {
         finishVisit()
         return
       }
     }
   }
 
-  /// Gesture only — total visit stays under visitMaxSeconds with leave.
+  /// Gesture length — each action reads clearly; poke stays on screen a beat longer.
   private var visitGestureDuration: Int {
     switch visitAction {
-    case "poke": return Int(0.7 * fps) // one quick boop
-    case "play": return Int(2.4 * fps)
-    case "nap": return Int(2.0 * fps)
-    default: return Int(2.2 * fps)
+    case "poke": return Int(2.8 * fps)
+    case "play": return Int(5.0 * fps)
+    case "talk": return Int(4.2 * fps)
+    default: return Int(4.0 * fps)
     }
   }
 
@@ -355,90 +341,42 @@ import AppKit
     // Host reacts when we’re actually close — not while we’re spawning.
     onGestureStart?()
     // Incoming actor = we do the action to the host.
-    // Outgoing target = we *receive* the host’s action (eat when fed, etc.).
-    let receiving = visitRole == .outgoingTarget
+    // Outgoing target = we *receive* the host’s action.
+    let hold = Double(visitGestureDuration) / fps
     switch visitAction {
-    case "pet":
-      happyTicks = Int(2.5 * fps)
-      angryTicks = 0
-      if receiving {
-        // Happily receiving pets.
-        switch species {
-        case .dog:
-          set(.sit, seconds: 2.4)
-          pawTicks = Int(1.6 * fps)
-          hop()
-          emit("❤️", count: 3)
-        case .bird:
-          set(.fly, seconds: 2.4)
-          y = hy + 36
-          emit("❤️", count: 2)
-          emit("✨", count: 2)
-        case .octopus:
-          set(.glide, seconds: 2.4)
-          emit("❤️", count: 2)
-          emit("🫧", count: 2)
-        }
-      } else {
-        // Giving pets to the host.
-        switch species {
-        case .dog:
-          set(.sit, seconds: 2.4)
-          pawTicks = Int(2.0 * fps)
-          emit("❤️", count: 3)
-          hop()
-        case .bird:
-          set(.fly, seconds: 2.4)
-          y = hy + 40
-          emit("❤️", count: 2)
-        case .octopus:
-          set(.glide, seconds: 2.4)
-          emit("🫧", count: 2)
-          emit("❤️", count: 2)
-        }
-      }
     case "poke":
-      angryTicks = Int(0.9 * fps)
+      // Longer poke: jab + mad eyes, then hold the glare.
       happyTicks = 0
-      emit("💢", count: 2)
-      hop()
+      angryTicks = Int(hold * fps)
+      emit("💢", count: 3)
       switch species {
-      case .dog: set(.sit, seconds: 0.7)
-      case .bird: set(.fly, seconds: 0.7)
-      case .octopus: set(.glide, seconds: 0.7)
-      }
-    case "feed":
-      if receiving {
-        // Friend’s pet eats — food matches *this* species (dog→🍖, bird→seed, …).
-        set(.eat, seconds: 2.4)
-        happyTicks = Int(2.4 * fps)
-        emit(Self.foodEmoji(species), count: 3)
-      } else {
-        // Offer food meant for the *host* — they play the eat reaction.
-        let forHost = hostSpecies?() ?? .dog
-        happyTicks = Int(2.0 * fps)
-        set(.sit, seconds: 2.2)
-        hop()
-        emit(Self.foodEmoji(forHost), count: 3)
+      case .dog:
+        set(.walk, seconds: hold) // lunging legs, not a sit
+        pawTicks = Int(0.6 * fps)
+      case .bird:
+        set(.fly, seconds: hold)
+        y = hy + 20
+      case .octopus:
+        set(.glide, seconds: hold)
+        pawTicks = Int(hold * 0.5 * fps)
       }
     case "play":
-      signaturePlay(seconds: 2.8)
+      signaturePlay(seconds: hold)
       emit(species == .dog ? "🎾" : (species == .bird ? "🪶" : "🫧"), count: 3)
       if !playKickoffSent {
         playKickoffSent = true
         onPlayWithHost?()
       }
-    case "nap":
-      if receiving {
-        untilWoken = true
-        set(.sleep, seconds: 2.2)
-        emit("💤", count: 2)
-      } else {
-        set(.sit, seconds: 2.0)
-        emit("💤", count: 2)
-      }
+    case "talk":
+      happyTicks = Int(hold * fps)
+      angryTicks = 0
+      set(.sit, seconds: hold)
+      emit("💬", count: 2)
+      sayFresh(PetLines.talk(species))
+      if species == .bird { y = hy + 16 }
+      else if species == .octopus { y = max(NSScreen.main!.visibleFrame.minY + 12, hy) }
     default:
-      set(.sit, seconds: 2)
+      set(.sit, seconds: hold)
     }
   }
 
@@ -451,54 +389,78 @@ import AppKit
   }
 
   private func runVisitGestureTick(hostX hx: CGFloat, hostY hy: CGFloat) {
+    let floor = NSScreen.main!.visibleFrame.minY
+    dir = -visitSide
     switch visitAction {
-    case "pet":
-      // Bounce into the host — reads as actual pats, not standing still.
-      if species == .dog {
-        if visitTicks % 10 == 0 {
-          hop()
-          emit("❤️", count: 2)
-          pawTicks = max(pawTicks, 14)
-        }
-        // Nudge slightly toward host on each pat.
-        x += (hx - x) * 0.08
-      }
-      if species == .bird {
-        y = hy + 28 + CGFloat(sin(Double(visitTicks) / 4)) * 10
-        x += (hx - x) * 0.1
-        if visitTicks % 8 == 0 { emit("❤️"); emit("✨") }
-      }
-      if species == .octopus {
-        y = max(NSScreen.main!.visibleFrame.minY + 12, hy + CGFloat(sin(Double(visitTicks) / 5)) * 8)
-        x += (hx - x) * 0.1
-        if visitTicks % 9 == 0 { emit("🫧"); emit("❤️") }
-      }
-    case "play":
-      // Stay beside host — little bounces, not a wide orbit across the desk.
-      let t = Double(visitTicks) / fps
-      x = hx + visitSide * (visitGap + CGFloat(sin(t * 6)) * 10)
-      dir = -visitSide
-      if species == .bird {
-        y = hy + 28 + CGFloat(sin(t * 6)) * 10
-      } else if species == .octopus {
-        y = max(NSScreen.main!.visibleFrame.minY + 14, hy + CGFloat(sin(t * 4)) * 8)
-      } else {
-        y = NSScreen.main!.visibleFrame.minY
-        if visitTicks % 8 == 0 { hop() }
-      }
-      if visitTicks % 10 == 0 {
-        emit(species == .dog ? "💨" : (species == .bird ? "✨" : "🫧"))
-      }
     case "poke":
-      // Single poke already fired in startVisitGesture — don’t keep bouncing.
-      break
-    case "feed":
-      if visitTicks % 10 == 0 {
-        let eater = visitRole == .outgoingTarget ? species : (hostSpecies?() ?? species)
-        emit(Self.foodEmoji(eater))
+      // Jab in / recoil — reads as a poke, not a hug.
+      angryTicks = max(angryTicks, 12)
+      let jab = (visitTicks / 14) % 2 == 0
+      let gap = jab ? visitGap * 0.42 : visitGap
+      x = hx + visitSide * gap
+      if species == .bird {
+        y = hy + (jab ? 12 : 22)
+      } else if species == .octopus {
+        y = max(floor + 10, hy + (jab ? 2 : 10))
+      } else {
+        y = floor + (jab ? 6 : 0)
+      }
+      if visitTicks % 14 == 0 {
+        emit("💢", count: jab ? 2 : 1)
+      }
+
+    case "play":
+      // Energetic beside host — dog play-bows / hops, bird loops, octopus drifts.
+      let t = Double(visitTicks) / fps
+      x = hx + visitSide * (visitGap + CGFloat(sin(t * 4.2)) * 10)
+      if species == .bird {
+        y = hy + 28 + CGFloat(sin(t * 5)) * 12
+        if visitTicks % 10 == 0 { emit("✨"); emit("🪶") }
+      } else if species == .octopus {
+        y = max(floor + 12, hy + 6 + CGFloat(sin(t * 3)) * 5)
+        if visitTicks % 16 == 0 { emit("🫧"); emit("🌊") }
+      } else {
+        // Dog: run-in-place hops + ball
+        y = floor
+        if visitTicks % 9 == 0 { hop(); emit("💨") }
+        if visitTicks % 15 == 0 { emit("🎾") }
+      }
+
+    case "talk":
+      // Face-to-face chat — sit still, chatter bubbles.
+      x = hx + visitSide * visitGap
+      if species == .bird {
+        y = hy + 16 + CGFloat(sin(Double(visitTicks) / 8)) * 3
+      } else if species == .octopus {
+        y = max(floor + 12, hy + CGFloat(sin(Double(visitTicks) / 10)) * 2)
+      } else {
+        y = floor
+      }
+      if visitTicks % 22 == 0 { emit("💬") }
+      if visitTicks == Int(1.2 * fps) || visitTicks == Int(2.6 * fps) {
+        sayFresh(PetLines.talk(species))
       }
     default:
       break
+    }
+  }
+
+  /// Float food from our side toward the host — reads as handing over, not eating them.
+  private func offerFoodTowardHost(_ text: String, count: Int = 2) {
+    let head = headPoint
+    let towardHost = -visitSide // visitor stands on visitSide → host is opposite
+    let n = min(count, 3)
+    for i in 0..<n {
+      particles.append(
+        Particle(
+          text: text,
+          pos: CGPoint(
+            x: head.x + towardHost * 14,
+            y: head.y - 2 + CGFloat(i) * 7),
+          vel: CGVector(
+            dx: towardHost * CGFloat.random(in: 1.4...2.0),
+            dy: CGFloat.random(in: 0.15...0.55)),
+          life: 55, maxLife: 55))
     }
   }
 
@@ -650,8 +612,8 @@ import AppKit
     let angry = angryTicks > 0
     let happy = !angry && (happyTicks > 0 || activity == .eat || activity == .run || pawTicks > 0)
     var l = Look(species: species)
-    if pawTicks > 0, species == .dog {
-      // Hang pose reads as a lifted stance — used as the “raise a paw” pat.
+    if pawTicks > 0, species == .dog || species == .octopus {
+      // Dog: raised stance. Octopus: raised tentacle (see drawOctopus .hang).
       l.pose = .hang
     } else {
       switch activity {

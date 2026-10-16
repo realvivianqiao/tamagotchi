@@ -11,17 +11,48 @@ struct FriendBond: Codable, Equatable {
   var lastActivity: String?
   /// Friend's chosen pet species raw value (dog/cat/bunny/fox/panda).
   var species: String
+  /// Care actions you sent them (poke / play / talk).
+  var sentCount: Int
+  /// Care actions they sent you.
+  var recvCount: Int
 
   var petSpecies: Species { Species.parse(species) }
 
+  /// Total moments exchanged — drives the ♥ badge in Friends.
+  var togetherCount: Int { sentCount + recvCount }
+
+  /// Heart for close bonds. Nil until you've actually hung out a bit.
+  var bondHeart: String? {
+    switch togetherCount {
+    case 25...: return "💕"
+    case 8...: return "❤️"
+    default: return nil
+    }
+  }
+
+  /// One-line friendship readout for the friend submenu.
+  var togetherLabel: String? {
+    guard togetherCount > 0 else { return nil }
+    let heart = bondHeart.map { "\($0) " } ?? ""
+    if sentCount > 0, recvCount > 0 {
+      return "\(heart)Together · \(togetherCount)  (you \(sentCount) · them \(recvCount))"
+    }
+    if sentCount > 0 {
+      return "\(heart)Together · \(togetherCount)  (you reached out)"
+    }
+    return "\(heart)Together · \(togetherCount)  (they reached out)"
+  }
+
   enum CodingKeys: String, CodingKey {
     case code, partnerName, online, waiting, fullness, happiness, lastActivity, species
+    case sentCount, recvCount
   }
 
   init(
     code: String, partnerName: String, online: Bool, waiting: Bool,
     fullness: Double, happiness: Double, lastActivity: String? = nil,
-    species: String = Species.dog.rawValue
+    species: String = Species.dog.rawValue,
+    sentCount: Int = 0, recvCount: Int = 0
   ) {
     self.code = code
     self.partnerName = partnerName
@@ -31,6 +62,8 @@ struct FriendBond: Codable, Equatable {
     self.happiness = happiness
     self.lastActivity = lastActivity
     self.species = species
+    self.sentCount = max(0, sentCount)
+    self.recvCount = max(0, recvCount)
   }
 
   init(from decoder: Decoder) throws {
@@ -43,6 +76,8 @@ struct FriendBond: Codable, Equatable {
     happiness = try c.decode(Double.self, forKey: .happiness)
     lastActivity = try c.decodeIfPresent(String.self, forKey: .lastActivity)
     species = try c.decodeIfPresent(String.self, forKey: .species) ?? Species.dog.rawValue
+    sentCount = try c.decodeIfPresent(Int.self, forKey: .sentCount) ?? 0
+    recvCount = try c.decodeIfPresent(Int.self, forKey: .recvCount) ?? 0
   }
 }
 
@@ -162,11 +197,30 @@ struct FriendBond: Codable, Equatable {
     }
   }
 
-  /// What friends see on the wire + visits: "Viv Test's Zuzu".
+  /// English possessive: James → James's, Ivars → Ivars' (names ending in s).
+  static func possessive(_ name: String) -> String {
+    let t = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let last = t.last else { return "'s" }
+    if last == "s" || last == "S" { return t + "'" }
+    return t + "'s"
+  }
+
+  /// Soft-fix stored labels like "Ivars's Zuzu" → "Ivars' Zuzu".
+  static func tidyPossessiveLabel(_ label: String) -> String {
+    var s = label
+    // Name ending in s + "'s " → "' "
+    while let r = s.range(of: #"([sS])'s\b"#, options: .regularExpression) {
+      let ch = s[r].prefix(1)
+      s.replaceSubrange(r, with: "\(ch)'")
+    }
+    return s
+  }
+
+  /// What friends see on the wire + visits: "Viv Test's Zuzu" / "Ivars' Zuzu".
   var displayName: String {
     get {
       migrateIdentityIfNeeded()
-      let full = "\(ownerName)'s \(padName)"
+      let full = "\(Self.possessive(ownerName)) \(padName)"
       return String(full.prefix(24))
     }
     set {
@@ -379,7 +433,7 @@ struct FriendBond: Codable, Equatable {
         onBondAlert?(
           again
             ? "Reconnected with \(host)!"
-            : "Bonded with \(host)! 🎉\nThey’re in your Friends list — pet/feed them from there.",
+            : "Bonded with \(host)! 🎉\nThey’re in your Friends list — poke, play, or talk from there.",
           true)
         track("claim_ok", code: pair, targetName: host, payload: ["shareCode": token])
       } catch {
@@ -681,11 +735,27 @@ struct FriendBond: Codable, Equatable {
       if merged.partnerName == "waiting…", !friends[i].waiting {
         merged.partnerName = friends[i].partnerName
       }
+      // Never wipe friendship tallies on reconnect / claim.
+      merged.sentCount = max(friends[i].sentCount, bond.sentCount)
+      merged.recvCount = max(friends[i].recvCount, bond.recvCount)
       friends[i] = merged
     } else {
       friends.append(bond)
     }
   }
+
+  /// Bump the per-friend together tally after a real care action.
+  func noteInteraction(code: String, direction: InteractionDirection) {
+    guard let i = friends.firstIndex(where: { $0.code == code }), !friends[i].waiting else { return }
+    switch direction {
+    case .sent: friends[i].sentCount += 1
+    case .received: friends[i].recvCount += 1
+    }
+    saveFriends()
+    onFriendsChanged?()
+  }
+
+  enum InteractionDirection { case sent, received }
 
   private func saveFriends() {
     let d = UserDefaults.standard
@@ -728,6 +798,8 @@ struct FriendBond: Codable, Equatable {
         "fullness": f.fullness,
         "happiness": f.happiness,
         "species": f.species,
+        "sentCount": f.sentCount,
+        "recvCount": f.recvCount,
       ]
       if let act = f.lastActivity { row["lastActivity"] = act }
       return row
@@ -735,9 +807,12 @@ struct FriendBond: Codable, Equatable {
     var body: [String: Any] = [
       "deviceId": deviceId,
       "displayName": displayName,
+      "ownerName": ownerName,
+      "padName": padName,
       "species": mySpecies.rawValue,
       "friends": payloadFriends,
     ]
+    if let shareCode { body["shareCode"] = shareCode }
     if let activeCode { body["activeCode"] = activeCode }
     if let fullness { body["fullness"] = fullness }
     if let happiness { body["happiness"] = happiness }
@@ -746,6 +821,40 @@ struct FriendBond: Codable, Equatable {
         _ = try await postJSON(path: "/api/me", body: body)
       } catch {
         // Cloud optional until Supabase env is set on Render.
+      }
+    }
+  }
+
+  /// Menu → Send feedback… → `/api/feedback` → `mochi_feedback`.
+  func submitFeedback(_ text: String, completion: ((Bool) -> Void)? = nil) {
+    let bodyText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !bodyText.isEmpty else {
+      completion?(false)
+      return
+    }
+    var body: [String: Any] = [
+      "deviceId": deviceId,
+      "ownerName": ownerName,
+      "displayName": displayName,
+      "body": String(bodyText.prefix(4000)),
+      "species": mySpecies.rawValue,
+      "appVersion": appVersion,
+    ]
+    let iso = ISO8601DateFormatter()
+    iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    body["clientTs"] = iso.string(from: Date())
+    Task { @MainActor in
+      do {
+        let res = try await postJSON(path: "/api/feedback", body: body)
+        // postJSON returns error payloads without throwing — require ok:true.
+        if res["ok"] as? Bool == true {
+          track("feedback_submit", payload: ["length": bodyText.count])
+          completion?(true)
+        } else {
+          completion?(false)
+        }
+      } catch {
+        completion?(false)
       }
     }
   }
@@ -770,6 +879,12 @@ struct FriendBond: Codable, Equatable {
       guard let raw = res["friends"] as? [[String: Any]] else { return }
       let cloud: [FriendBond] = raw.compactMap { row in
         guard let code = row["code"] as? String, !code.isEmpty else { return nil }
+        let sent = (row["sentCount"] as? Int)
+          ?? (row["sentCount"] as? Double).map { Int($0) }
+          ?? 0
+        let recv = (row["recvCount"] as? Int)
+          ?? (row["recvCount"] as? Double).map { Int($0) }
+          ?? 0
         return FriendBond(
           code: code,
           partnerName: (row["partnerName"] as? String) ?? "friend",
@@ -778,13 +893,20 @@ struct FriendBond: Codable, Equatable {
           fullness: (row["fullness"] as? Double) ?? 80,
           happiness: (row["happiness"] as? Double) ?? 80,
           lastActivity: row["lastActivity"] as? String,
-          species: (row["species"] as? String) ?? Species.dog.rawValue)
+          species: (row["species"] as? String) ?? Species.dog.rawValue,
+          sentCount: sent,
+          recvCount: recv)
       }
       if friends.isEmpty {
         friends = cloud
       } else {
-        for c in cloud where !friends.contains(where: { $0.code == c.code }) {
-          friends.append(c)
+        for c in cloud {
+          if let i = friends.firstIndex(where: { $0.code == c.code }) {
+            friends[i].sentCount = max(friends[i].sentCount, c.sentCount)
+            friends[i].recvCount = max(friends[i].recvCount, c.recvCount)
+          } else {
+            friends.append(c)
+          }
         }
       }
       // Persist locally without re-triggering an immediate cloudPush loop
@@ -968,7 +1090,7 @@ struct FriendBond: Codable, Equatable {
       let cleanAction: String? = {
         guard let action else { return nil }
         let a = action.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard ["feed", "play", "pet", "poke", "nap"].contains(a) else { return nil }
+        guard ["play", "poke", "talk"].contains(a) else { return nil }
         return a
       }()
       onSync?(f, h, cleanAction, from, code, fromSpecies)

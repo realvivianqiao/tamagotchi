@@ -219,6 +219,17 @@ struct FriendBond: Codable, Equatable {
   private(set) var activeCode: String?
   private(set) var connected = false
 
+  private static let appearOnlineKey = "mochiAppearOnline"
+
+  /// When false, detach from bond rooms so friends see you offline.
+  var appearOnline: Bool {
+    get {
+      if UserDefaults.standard.object(forKey: Self.appearOnlineKey) == nil { return true }
+      return UserDefaults.standard.bool(forKey: Self.appearOnlineKey)
+    }
+    set { setAppearOnline(newValue) }
+  }
+
   /// Convenience for the friend currently on your desktop.
   var partner: String? { activeFriend?.partnerName }
   var partnerOnline: Bool { activeFriend?.online ?? false }
@@ -499,15 +510,19 @@ struct FriendBond: Codable, Equatable {
       friends[i].lastActivity = "you: \(action)"
       saveFriends()
     }
-    // Actions must land — reconnect + re-attach if the socket dropped.
+    // Actions need a room attach — only while appearing online.
     if action != nil {
+      guard appearOnline else {
+        onStatus?("you're offline — go online to reach friends")
+        return
+      }
       Task { @MainActor in
         await ensureAttached(to: code)
         self.sendSync(fullness: fullness, happiness: happiness, action: action, code: code)
       }
       return
     }
-    guard connected else { return }
+    guard appearOnline, connected else { return }
     sendSync(fullness: fullness, happiness: happiness, action: nil, code: code)
   }
 
@@ -522,9 +537,40 @@ struct FriendBond: Codable, Equatable {
     send(msg)
   }
 
+  /// Toggle whether friends see you as online (attached to bond rooms).
+  @MainActor
+  func setAppearOnline(_ on: Bool) {
+    let prev = UserDefaults.standard.object(forKey: Self.appearOnlineKey) == nil
+      ? true
+      : UserDefaults.standard.bool(forKey: Self.appearOnlineKey)
+    UserDefaults.standard.set(on, forKey: Self.appearOnlineKey)
+    guard prev != on else {
+      onPresence?()
+      return
+    }
+    if on {
+      ensureSocket()
+      send(["type": "hello", "deviceId": deviceId, "name": displayName])
+      for f in friends where !f.waiting {
+        attachNow(code: f.code)
+      }
+      onStatus?("you're online 🟢")
+    } else {
+      for f in friends {
+        send(["type": "detach", "code": f.code])
+      }
+      // Local view of partners goes quiet until we re-attach and hear presence again.
+      for i in friends.indices { friends[i].online = false }
+      onStatus?("you're offline ⚪️")
+    }
+    onPresence?()
+    onFriendsChanged?()
+  }
+
   /// Make sure this pad is in the bond room so presence + actions work both ways.
   @MainActor
   func ensureAttached(to code: String) async {
+    guard appearOnline else { return }
     ensureSocket()
     if !connected {
       send(["type": "hello", "deviceId": deviceId, "name": displayName])
@@ -578,7 +624,9 @@ struct FriendBond: Codable, Equatable {
       if activeCode == nil { activeCode = friends.first?.code }
       onFriendsChanged?()
       onPresence?()
-      for f in friends where !f.waiting { await ensureAttached(to: f.code) }
+      if appearOnline {
+        for f in friends where !f.waiting { await ensureAttached(to: f.code) }
+      }
     }
   }
 
@@ -591,6 +639,7 @@ struct FriendBond: Codable, Equatable {
         self.ensureSocket()
         self.send(["type": "ping"])
         self.send(["type": "hello", "deviceId": self.deviceId, "name": self.displayName])
+        guard self.appearOnline else { return }
         for f in self.friends where !f.waiting {
           self.attachNow(code: f.code)
         }
@@ -800,6 +849,7 @@ struct FriendBond: Codable, Equatable {
   }
 
   private func attach(code: String) {
+    guard appearOnline else { return }
     ensureSocket()
     Task { @MainActor in
       try? await Task.sleep(nanoseconds: 300_000_000)
@@ -808,6 +858,7 @@ struct FriendBond: Codable, Equatable {
   }
 
   private func attachNow(code: String) {
+    guard appearOnline else { return }
     var msg: [String: Any] = [
       "type": "attach", "code": code, "name": displayName,
       "deviceId": deviceId,

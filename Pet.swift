@@ -213,6 +213,10 @@ import AppKit
       statusItem.button?.title = "😴"
       return
     }
+    if !Online.shared.appearOnline {
+      statusItem.button?.title = "\(species.emoji)⚪️"
+      return
+    }
     let onlineCount = Online.shared.friends.filter { $0.online && !$0.waiting }.count
     statusItem.button?.title = onlineCount > 0 ? "\(species.emoji)🟢" : species.emoji
   }
@@ -1119,11 +1123,16 @@ import AppKit
   private func sendToFriend(action: String, code: String, name: String) {
     Online.shared.setActive(code: code)
     logApp("menu_friend_\(action)", code: code, targetName: name)
-    // Local visit always plays here; sync reaches them only if both are in the bond room (🟢).
-    Online.shared.sync(fullness: fullness, happiness: happiness, action: action, toCode: code)
-    let friendOnline = Online.shared.friends.first(where: { $0.code == code })?.online == true
-    if !friendOnline {
-      say("\(name) looks offline ⚪️ — open CoPet on both Macs", seconds: 2.5)
+    if !Online.shared.appearOnline {
+      say("you're offline — go online to reach friends", seconds: 2.5)
+      // Still play the local visit preview on your screen.
+    } else {
+      // Sync reaches them only if both are in the bond room (🟢).
+      Online.shared.sync(fullness: fullness, happiness: happiness, action: action, toCode: code)
+      let friendOnline = Online.shared.friends.first(where: { $0.code == code })?.online == true
+      if !friendOnline {
+        say("\(name) looks offline ⚪️ — open CoPet on both Macs", seconds: 2.5)
+      }
     }
     let friendSpecies =
       Online.shared.friends.first(where: { $0.code == code })?.petSpecies ?? .dog
@@ -1480,6 +1489,14 @@ import AppKit
     say("hi! i'm \(Online.shared.displayName)", seconds: 3)
   }
 
+  @objc private func toggleAppearOnline() {
+    let next = !Online.shared.appearOnline
+    Online.shared.setAppearOnline(next)
+    logApp(next ? "appear_online" : "appear_offline")
+    say(next ? "online 🟢" : "offline ⚪️", seconds: 2)
+    refreshStatusItem()
+  }
+
   private func ensureDisplayName() {
     let d = UserDefaults.standard
     if d.string(forKey: "mochiOwnerName") == nil, d.string(forKey: "mochiName") == nil {
@@ -1536,6 +1553,11 @@ import AppKit
     if !hidden {
       menu.addItem(info(petName))
     }
+    let presence = item(
+      Online.shared.appearOnline ? "🟢  Online" : "⚪️  Offline",
+      #selector(toggleAppearOnline))
+    if Online.shared.appearOnline { presence.state = .on }
+    menu.addItem(presence)
     menu.addItem(info("Fullness   \(bar(fullness))"))
     menu.addItem(info("Happiness  \(bar(happiness))"))
 

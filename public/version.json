@@ -1,6 +1,6 @@
 {
-  "version": "0.5.26",
+  "version": "0.5.27",
   "url": "/CoPet.zip",
-  "notes": "Move username/pad to top of menu; drop the online status note row.",
-  "publishedAt": "2026-10-16T04:01:57Z"
+  "notes": "Add Online/Offline toggle at the top of the menu.",
+  "publishedAt": "2026-10-16T04:03:54Z"
 }

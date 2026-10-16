@@ -1532,20 +1532,19 @@ import AppKit
 
   func menuNeedsUpdate(_ menu: NSMenu) {
     menu.removeAllItems()
+    menu.addItem(item("My username / pad…", #selector(onlineSetName), symbol: "pencil"))
+    if !hidden {
+      menu.addItem(info(petName))
+    }
     menu.addItem(info("Fullness   \(bar(fullness))"))
     menu.addItem(info("Happiness  \(bar(happiness))"))
 
     let friends = Online.shared.friends
     let onlineN = friends.filter { $0.online && !$0.waiting }.count
     menu.addItem(info("Friends    \(friends.count) · \(onlineN) online"))
-
-    if let note = onlineNote {
-      menu.addItem(info(note))
-    }
     menu.addItem(.separator())
 
     if !hidden {
-      menu.addItem(info(petName))
       menu.addItem(item("💢  Poke", #selector(pokeSelf)))
       menu.addItem(item("🍖  Feed", #selector(feed)))
       menu.addItem(item("🎾  Play", #selector(play)))
@@ -1638,7 +1637,6 @@ import AppKit
     }
     bondsItem.submenu = bondsMenu
     menu.addItem(bondsItem)
-    menu.addItem(item("My username / pad…", #selector(onlineSetName), symbol: "pencil"))
     menu.addItem(item("Check for updates…", #selector(checkForUpdates), symbol: "arrow.triangle.2.circlepath"))
     menu.addItem(.separator())
     menu.addItem(item("Quit", #selector(quit), symbol: "xmark.circle"))

@@ -1,6 +1,6 @@
 {
-  "version": "0.5.25",
+  "version": "0.5.26",
   "url": "/CoPet.zip",
-  "notes": "Freeze dance hops while the menu is open so it doesn\u2019t bounce.",
-  "publishedAt": "2026-10-16T04:00:17Z"
+  "notes": "Move username/pad to top of menu; drop the online status note row.",
+  "publishedAt": "2026-10-16T04:01:57Z"
 }

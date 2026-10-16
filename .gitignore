@@ -8,11 +8,7 @@ build/
 tamagotchi/
 # Sparkle private key — NEVER commit. Back up secrets/sparkle_eddsa_private.key safely.
 secrets/
-vendor/Sparkle-*.tar.xz
-vendor/Sparkle Test App.app/
-vendor/Symbols/
-vendor/CHANGELOG
-vendor/INSTALL
-vendor/LICENSE
-vendor/SampleAppcast.xml
+# Sparkle is fetched by scripts/fetch-sparkle.sh (not committed).
+vendor/*
+!vendor/README.md
 CoPet.zip

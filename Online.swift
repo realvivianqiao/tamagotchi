@@ -72,6 +72,9 @@ struct FriendBond: Codable, Equatable {
     return URL(string: s) ?? httpBase
   }
 
+  /// Public base for version.json / CoPet.zip downloads.
+  var httpRootForUpdates: URL { httpRoot }
+
   /// Old bundle id used UserDefaults under this suite — migrate so CoPet keeps the same pad.
   private static let legacySuiteName = "com.vivianqiao.mochi"
   private static let migrateKeys = [

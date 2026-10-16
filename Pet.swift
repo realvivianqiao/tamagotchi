@@ -142,6 +142,7 @@ import AppKit
       self.pushOnline()
     }
     Online.shared.restoreBondIfAny()
+    Updater.checkOnLaunch()
   }
 
   private func refreshStatusItem() {
@@ -1212,8 +1213,13 @@ import AppKit
       menu.addItem(item("Leave all bonds", #selector(onlineLeave)))
     }
     menu.addItem(item("My name…", #selector(onlineSetName)))
+    menu.addItem(item("Check for updates…", #selector(checkForUpdates)))
     menu.addItem(.separator())
     menu.addItem(item("Quit CoPet", #selector(quit)))
+  }
+
+  @objc private func checkForUpdates() {
+    Updater.checkNow()
   }
 
   private func item(_ title: String, _ action: Selector) -> NSMenuItem {

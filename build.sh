@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 APP=build/CoPet.app
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 MIN=13.0
-SRCS="main.swift Sprites.swift PetLines.swift PetView.swift Pet.swift Online.swift FriendVisitor.swift PetPicker.swift"
+SRCS="main.swift Sprites.swift PetLines.swift PetView.swift Pet.swift Online.swift FriendVisitor.swift PetPicker.swift Updater.swift"
 swiftc -O -swift-version 5 -target "arm64-apple-macosx${MIN}" \
   $SRCS -o /tmp/CoPet-arm64
 swiftc -O -swift-version 5 -target "x86_64-apple-macosx${MIN}" \
@@ -57,4 +57,21 @@ fi
 /tmp/CoPetMakeIcon public/app-icon.png 1024
 
 codesign --force --deep --sign - "$APP"
+
+# Publish downloadable zip + version.json so installed apps can auto-update.
+VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist 2>/dev/null || echo "0.0")
+NOTES=${UPDATE_NOTES:-"Improvements and fixes."}
+ditto -c -k --sequesterRsrc --keepParent "$APP" public/CoPet.zip
+PUBLISHED=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+# Escape notes for JSON without requiring jq.
+NOTES_JSON=$(UPDATE_NOTES="$NOTES" python3 -c 'import json,os; print(json.dumps(os.environ.get("UPDATE_NOTES","")))')
+cat > public/version.json <<EOF
+{
+  "version": "${VERSION}",
+  "url": "/CoPet.zip",
+  "notes": ${NOTES_JSON},
+  "publishedAt": "${PUBLISHED}"
+}
+EOF
 echo "Built $APP (universal + ad-hoc signed + dog icon)"
+echo "Published public/CoPet.zip + public/version.json (v${VERSION})"

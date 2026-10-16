@@ -37,6 +37,7 @@ const mime = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
@@ -320,6 +321,8 @@ async function serveStatic(req, res) {
       const type = mime[extname(safe)] || "application/octet-stream";
       const headers = { "content-type": type };
       if (extname(safe) === ".zip") headers["content-disposition"] = 'attachment; filename="CoPet.zip"';
+      // Clients poll this to auto-update — never serve a stale copy.
+      if (rel === "version.json") headers["cache-control"] = "no-store";
       res.writeHead(200, headers);
       return res.end(data);
     } catch {

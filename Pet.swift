@@ -995,7 +995,7 @@ import AppKit
       }
       let site = "https://tamagotchi-udtz.onrender.com"
       let msg = """
-      Mochi code \(code)
+      CoPet code \(code)
 
       1) download \(site)
       2) 🐶 → Claim invite → paste \(code)
@@ -1074,7 +1074,7 @@ import AppKit
 
   private func alert(_ text: String) {
     let a = NSAlert()
-    a.messageText = "Mochi"
+    a.messageText = "CoPet"
     a.informativeText = text
     a.addButton(withTitle: "OK")
     NSApp.activate(ignoringOtherApps: true)

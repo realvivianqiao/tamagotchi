@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 
 // MARK: - Tunables
 
-let defaultPetName = "Mochi"
+let defaultPetName = "CoPet"
 let scale: CGFloat = 4 // exact zoomies-dog size on the dock
 let fps: Double = 30
 
@@ -337,94 +337,41 @@ struct Particle {
 // MARK: - Sprite sheet preview (for tweaking the art without launching the app)
 
 func writePreview(to path: String) {
-  // Hero = the dock moment: big zoomies dog + friends on a soft white desk.
-  let dog = Look(species: .dog, pose: .walk(0), eyes: .happy, tongue: true, wag: 1)
-  let friends: [Look] = [
+  // Clean hero art: three pets fully in frame — no bubbles (site lays out text separately).
+  let looks: [Look] = [
+    Look(species: .dog, pose: .walk(0), eyes: .happy, tongue: true, wag: 1),
     Look(species: .octopus, pose: .walk(0), eyes: .happy, tongue: true, wag: 1),
     Look(species: .bird, pose: .walk(0), eyes: .happy, tongue: true, wag: 1),
   ]
-  let w = 1400, h = 900
+  let w = 1200, h = 640
+  let s = 12
   let ctx = CGContext(
     data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
     space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
 
-  // clean light desktop
-  ctx.setFillColor(CGColor(red: 0.97, green: 0.96, blue: 0.94, alpha: 1))
+  ctx.setFillColor(CGColor(red: 0.98, green: 0.95, blue: 0.90, alpha: 1))
   ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
-
-  // faux dock bar
-  let dockH: CGFloat = 88
-  ctx.setFillColor(CGColor(red: 0.92, green: 0.92, blue: 0.93, alpha: 0.95))
-  ctx.fill(CGRect(x: 80, y: 36, width: CGFloat(w) - 160, height: dockH))
-  ctx.setStrokeColor(CGColor(red: 0.75, green: 0.75, blue: 0.78, alpha: 1))
-  ctx.setLineWidth(2)
-  ctx.stroke(CGRect(x: 80, y: 36, width: CGFloat(w) - 160, height: dockH))
-  // little fake dock icons
-  let iconColors: [(CGFloat, CGFloat, CGFloat)] = [
-    (0.95, 0.35, 0.40), (0.30, 0.55, 0.95), (0.20, 0.75, 0.45),
-    (0.98, 0.55, 0.20), (0.55, 0.35, 0.90), (0.15, 0.15, 0.18),
-  ]
-  for (i, rgb) in iconColors.enumerated() {
-    let ix = 120 + CGFloat(i) * 72
-    ctx.setFillColor(CGColor(red: rgb.0, green: rgb.1, blue: rgb.2, alpha: 1))
-    let r = CGRect(x: ix, y: 52, width: 56, height: 56)
-    ctx.beginPath()
-    ctx.addPath(CGPath(roundedRect: r, cornerWidth: 12, cornerHeight: 12, transform: nil))
-    ctx.fillPath()
-  }
+  // soft ground
+  ctx.setFillColor(CGColor(red: 0.55, green: 0.80, blue: 0.55, alpha: 1))
+  ctx.fill(CGRect(x: 0, y: 0, width: w, height: 96))
+  ctx.setFillColor(CGColor(red: 0.72, green: 0.55, blue: 0.35, alpha: 1))
+  ctx.fill(CGRect(x: 0, y: 0, width: w, height: 18))
 
   ctx.interpolationQuality = .none
-  // big dog (the star)
-  let dogS = 18
-  let dogW = CGFloat(Canvas.w * dogS), dogH = CGFloat(Canvas.h * dogS)
-  let dogX = CGFloat(w) * 0.5 - dogW * 0.55
-  let dogY = dockH + 28
-  ctx.saveGState()
-  ctx.translateBy(x: dogX + dogW, y: dogY)
-  ctx.scaleBy(x: -1, y: 1)
-  ctx.draw(Dog.sprite(dog).image, in: CGRect(x: 0, y: 0, width: dogW, height: dogH))
-  ctx.restoreGState()
-
-  // friends smaller to the right
-  let friendS = 11
-  let fW = CGFloat(Canvas.w * friendS), fH = CGFloat(Canvas.h * friendS)
-  for (i, look) in friends.enumerated() {
-    let fx = dogX + dogW + 40 + CGFloat(i) * (fW + 28)
-    let fy = dogY + 20
+  let petW = CGFloat(Canvas.w * s), petH = CGFloat(Canvas.h * s)
+  let total = CGFloat(looks.count) * petW
+  let gap = (CGFloat(w) - total) / CGFloat(looks.count + 1)
+  let y: CGFloat = 48
+  for (i, look) in looks.enumerated() {
+    let x = gap + CGFloat(i) * (petW + gap)
+    ctx.setFillColor(CGColor(red: 0.3, green: 0.4, blue: 0.25, alpha: 0.18))
+    ctx.fillEllipse(in: CGRect(x: x + 24, y: y - 6, width: petW - 48, height: 20))
     ctx.saveGState()
-    ctx.translateBy(x: fx + fW, y: fy)
+    ctx.translateBy(x: x + petW, y: y)
     ctx.scaleBy(x: -1, y: 1)
-    ctx.draw(Dog.sprite(look).image, in: CGRect(x: 0, y: 0, width: fW, height: fH))
+    ctx.draw(Dog.sprite(look).image, in: CGRect(x: 0, y: 0, width: petW, height: petH))
     ctx.restoreGState()
   }
-
-  // zoomies bubble
-  let bw: CGFloat = 260, bh: CGFloat = 72
-  let bx = dogX + dogW * 0.15
-  let by = dogY + dogH + 20
-  ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
-  ctx.setStrokeColor(CGColor(red: 0.29, green: 0.17, blue: 0.07, alpha: 1))
-  ctx.setLineWidth(3.5)
-  let bubble = CGRect(x: bx, y: by, width: bw, height: bh)
-  ctx.addPath(CGPath(roundedRect: bubble, cornerWidth: 20, cornerHeight: 20, transform: nil))
-  ctx.drawPath(using: .fillStroke)
-  ctx.move(to: CGPoint(x: bx + 50, y: by))
-  ctx.addLine(to: CGPoint(x: bx + 36, y: by - 18))
-  ctx.addLine(to: CGPoint(x: bx + 72, y: by))
-  ctx.closePath()
-  ctx.drawPath(using: .fillStroke)
-
-  let nsCtx = NSGraphicsContext(cgContext: ctx, flipped: false)
-  NSGraphicsContext.saveGraphicsState()
-  NSGraphicsContext.current = nsCtx
-  let text = "zoomies!! 🎾" as NSString
-  let attrs: [NSAttributedString.Key: Any] = [
-    .font: NSFont.systemFont(ofSize: 30, weight: .semibold),
-    .foregroundColor: NSColor(red: 0.29, green: 0.17, blue: 0.07, alpha: 1),
-  ]
-  let size = text.size(withAttributes: attrs)
-  text.draw(at: CGPoint(x: bx + (bw - size.width) / 2, y: by + (bh - size.height) / 2 - 1), withAttributes: attrs)
-  NSGraphicsContext.restoreGraphicsState()
 
   let dest = CGImageDestinationCreateWithURL(URL(fileURLWithPath: path) as CFURL, UTType.png.identifier as CFString, 1, nil)!
   CGImageDestinationAddImage(dest, ctx.makeImage()!, nil)

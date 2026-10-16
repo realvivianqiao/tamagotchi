@@ -287,7 +287,7 @@ async function serveStatic(req, res) {
       const data = await readFile(safe);
       const type = mime[extname(safe)] || "application/octet-stream";
       const headers = { "content-type": type };
-      if (extname(safe) === ".zip") headers["content-disposition"] = 'attachment; filename="Mochi.zip"';
+      if (extname(safe) === ".zip") headers["content-disposition"] = 'attachment; filename="CoPet.zip"';
       res.writeHead(200, headers);
       return res.end(data);
     } catch {
@@ -654,5 +654,5 @@ wss.on("connection", (ws) => {
 
 await loadInvites();
 httpServer.listen(PORT, () => {
-  console.log(`mochi site + api + ws on :${PORT}`);
+  console.log(`CoPet site + api + ws on :${PORT}`);
 });

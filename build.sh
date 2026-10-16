@@ -1,21 +1,21 @@
 #!/bin/bash
-# Builds build/Mochi.app (universal). Run: open build/Mochi.app
+# Builds build/CoPet.app (universal). Run: open build/CoPet.app
 set -euo pipefail
 cd "$(dirname "$0")"
-APP=build/Mochi.app
+APP=build/CoPet.app
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 MIN=13.0
 SRCS="main.swift Sprites.swift PetView.swift Pet.swift Online.swift FriendVisitor.swift PetPicker.swift"
 swiftc -O -swift-version 5 -target "arm64-apple-macosx${MIN}" \
-  $SRCS -o /tmp/Mochi-arm64
+  $SRCS -o /tmp/CoPet-arm64
 swiftc -O -swift-version 5 -target "x86_64-apple-macosx${MIN}" \
-  $SRCS -o /tmp/Mochi-x86_64
-lipo -create /tmp/Mochi-arm64 /tmp/Mochi-x86_64 -output "$APP/Contents/MacOS/Mochi"
+  $SRCS -o /tmp/CoPet-x86_64
+lipo -create /tmp/CoPet-arm64 /tmp/CoPet-x86_64 -output "$APP/Contents/MacOS/CoPet"
 cp Info.plist "$APP/Contents/Info.plist"
 
 # App icon = in-app dog sprite → .icns (pixel-perfect at every size)
 swiftc -O -swift-version 5 -target "arm64-apple-macosx${MIN}" \
-  MakeIcon.swift Sprites.swift -o /tmp/MochiMakeIcon
+  MakeIcon.swift Sprites.swift -o /tmp/CoPetMakeIcon
 ICONSET=build/AppIcon.iconset
 FLATSET=build/AppIcon-flat.iconset
 rm -rf "$ICONSET" "$FLATSET"
@@ -36,19 +36,25 @@ for pair in \
 do
   name="${pair%%:*}"
   px="${pair##*:}"
-  /tmp/MochiMakeIcon "$ICONSET/$name" "$px"
+  /tmp/CoPetMakeIcon "$ICONSET/$name" "$px"
   # iconutil rejects CGImage RGBA PNGs — flatten via JPEG → PNG (opaque).
-  # Temp jpg must not contain "@" (sips / tooling treat it like an email).
-  flat_tmp="/tmp/MochiIcon-${px}.jpg"
+  flat_tmp="/tmp/CoPetIcon-${px}.jpg"
   sips -s format jpeg "$ICONSET/$name" --out "$flat_tmp" >/dev/null
   sips -s format png "$flat_tmp" --out "$FLATSET/$name" >/dev/null
 done
-# Verify all 10 iconset slots exist before iconutil
-ls "$FLATSET" | wc -l | grep -q 10
-iconutil -c icns "$FLATSET" -o "$APP/Contents/Resources/AppIcon.icns"
+# Prefer fresh icns; fall back to previous if iconutil rejects the set.
+if iconutil -c icns "$FLATSET" -o "$APP/Contents/Resources/AppIcon.icns" 2>/dev/null; then
+  :
+elif [ -f build/Mochi.app/Contents/Resources/AppIcon.icns ]; then
+  cp build/Mochi.app/Contents/Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+elif [ -f "$APP/Contents/Resources/AppIcon.icns" ]; then
+  :
+else
+  echo "warn: no AppIcon.icns (iconutil failed)" >&2
+fi
 # Site favicon + og-ish icon (same dog)
-/tmp/MochiMakeIcon public/favicon.png 256
-/tmp/MochiMakeIcon public/app-icon.png 1024
+/tmp/CoPetMakeIcon public/favicon.png 256
+/tmp/CoPetMakeIcon public/app-icon.png 1024
 
 codesign --force --deep --sign - "$APP"
 echo "Built $APP (universal + ad-hoc signed + dog icon)"

@@ -1,7 +1,7 @@
-// Mochi — a tiny golden retriever that lives on your desktop.
+// CoPet — a tiny pet that lives on your desktop.
 //
-// Build:   ./build.sh && open build/Mochi.app
-// Preview: build/Mochi.app/Contents/MacOS/Mochi --preview sprites.png
+// Build:   ./build.sh && open build/CoPet.app
+// Preview: build/CoPet.app/Contents/MacOS/CoPet --preview sprites.png
 
 import AppKit
 

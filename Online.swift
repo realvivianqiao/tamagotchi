@@ -397,7 +397,7 @@ struct FriendBond: Codable, Equatable {
 
   private func postJSON(path: String, body: [String: Any]) async throws -> [String: Any] {
     guard let url = URL(string: path, relativeTo: httpRoot)?.absoluteURL else {
-      throw NSError(domain: "Mochi", code: 1, userInfo: [NSLocalizedDescriptionKey: "bad url"])
+      throw NSError(domain: "CoPet", code: 1, userInfo: [NSLocalizedDescriptionKey: "bad url"])
     }
     var req = URLRequest(url: url)
     req.httpMethod = "POST"
@@ -409,14 +409,14 @@ struct FriendBond: Codable, Equatable {
     let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
     if status >= 400 {
       if json["error"] != nil { return json }
-      throw NSError(domain: "Mochi", code: status, userInfo: [NSLocalizedDescriptionKey: (json["error"] as? String) ?? "HTTP \(status)"])
+      throw NSError(domain: "CoPet", code: status, userInfo: [NSLocalizedDescriptionKey: (json["error"] as? String) ?? "HTTP \(status)"])
     }
     return json
   }
 
   private func getJSON(path: String) async throws -> [String: Any] {
     guard let url = URL(string: path, relativeTo: httpRoot)?.absoluteURL else {
-      throw NSError(domain: "Mochi", code: 1, userInfo: [NSLocalizedDescriptionKey: "bad url"])
+      throw NSError(domain: "CoPet", code: 1, userInfo: [NSLocalizedDescriptionKey: "bad url"])
     }
     var req = URLRequest(url: url)
     req.httpMethod = "GET"
@@ -425,7 +425,7 @@ struct FriendBond: Codable, Equatable {
     let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
     let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
     if status >= 400 {
-      throw NSError(domain: "Mochi", code: status, userInfo: [NSLocalizedDescriptionKey: (json["error"] as? String) ?? "HTTP \(status)"])
+      throw NSError(domain: "CoPet", code: status, userInfo: [NSLocalizedDescriptionKey: (json["error"] as? String) ?? "HTTP \(status)"])
     }
     return json
   }

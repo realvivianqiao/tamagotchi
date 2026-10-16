@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Mochi — tiny pets for your Mac</title>
+  <title>CoPet — tiny pets for your Mac</title>
   <meta name="description" content="A little pixel pet that lives on your desktop. Invite a friend — feed and pet sync live." />
   <link rel="icon" type="image/png" href="/favicon.png" />
   <link rel="apple-touch-icon" href="/app-icon.png" />
@@ -14,9 +14,9 @@
     :root {
       --ink: #3a2412;
       --soft: #6b5340;
-      --cream: #faf8f5;
+      --cream: #faf7f2;
       --butter: #ffd45a;
-      --line: #d9d4cc;
+      --line: #e4ddd3;
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; min-height: 100%; }
@@ -26,55 +26,27 @@
       background: var(--cream);
     }
 
-    .hero {
-      min-height: 100vh;
-      min-height: 100dvh;
-      display: grid;
-      grid-template-rows: 1fr auto;
-      position: relative;
-      overflow: hidden;
-      background: #f5f4f1;
-    }
-
-    .hero-art {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      object-position: center 55%;
-      image-rendering: pixelated;
-      image-rendering: crisp-edges;
-      z-index: 0;
-      background: #f5f4f1;
-    }
-
-    .hero-copy {
-      position: relative;
-      z-index: 2;
-      padding: clamp(1.25rem, 3.5vw, 2.5rem);
-      padding-bottom: clamp(1.75rem, 4vw, 2.75rem);
+    .top {
+      max-width: 52rem;
+      margin: 0 auto;
+      padding: clamp(1.75rem, 5vw, 3rem) clamp(1.25rem, 4vw, 2rem) 0;
       text-align: center;
-      background: linear-gradient(to top, rgba(245, 244, 241, 0.97) 55%, transparent);
     }
-
     .brand {
       font-weight: 800;
-      font-size: clamp(2.6rem, 8vw, 4rem);
-      line-height: 1;
-      margin: 0 0 0.4rem;
-      letter-spacing: -0.02em;
+      font-size: clamp(2.75rem, 9vw, 4.25rem);
+      line-height: 0.95;
+      margin: 0 0 0.5rem;
+      letter-spacing: -0.03em;
     }
-
     .tagline {
-      margin: 0 auto 1.15rem;
-      max-width: 26rem;
-      font-size: clamp(1rem, 2.2vw, 1.15rem);
+      margin: 0 auto 1.25rem;
+      max-width: 24rem;
+      font-size: clamp(1rem, 2.4vw, 1.15rem);
       font-weight: 700;
       color: var(--soft);
       line-height: 1.4;
     }
-
     .cta {
       display: inline-block;
       font-weight: 800;
@@ -91,19 +63,34 @@
     .cta:hover { transform: translateY(1px); box-shadow: 0 2px 0 var(--ink); }
     .cta:active { transform: translateY(3px); box-shadow: 0 0 0 var(--ink); }
 
-    .play {
-      border-top: 2px solid var(--line);
-      padding: clamp(2rem, 5vw, 3.25rem) clamp(1.25rem, 4vw, 2rem) 3rem;
-      background: #fff;
+    .art-wrap {
+      max-width: 52rem;
+      margin: 1.5rem auto 0;
+      padding: 0 clamp(0.75rem, 3vw, 1.5rem);
     }
-    .play-inner { max-width: 34rem; margin: 0 auto; }
+    .art-wrap img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: 1rem;
+      border: 3px solid var(--ink);
+      background: #faf3e8;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+
+    .play {
+      max-width: 36rem;
+      margin: 0 auto;
+      padding: clamp(2rem, 5vw, 3rem) clamp(1.25rem, 4vw, 2rem) 3rem;
+    }
     .play h2 {
       font-weight: 800;
       font-size: 1.35rem;
       margin: 0 0 0.3rem;
     }
-    .play > .play-inner > p {
-      margin: 0 0 1.2rem;
+    .play > p {
+      margin: 0 0 1.15rem;
       color: var(--soft);
       font-weight: 700;
     }
@@ -124,7 +111,7 @@
       font-weight: 700;
       color: var(--soft);
       line-height: 1.35;
-      background: var(--cream);
+      background: #fff;
     }
     ol.steps li::before {
       content: counter(step);
@@ -162,31 +149,30 @@
   </style>
 </head>
 <body>
-  <section class="hero" aria-label="Mochi">
-    <img class="hero-art" src="/pets.png" width="1400" height="900" alt="Pixel dog saying zoomies on a Mac dock, with octopus and bird friends" />
-    <div class="hero-copy">
-      <h1 class="brand">Mochi</h1>
-      <p class="tagline">Tiny pets for your Mac. Invite a friend — feed and pet sync live.</p>
-      <a class="cta" href="/Mochi.zip">Download for Mac ↓</a>
-    </div>
-  </section>
+  <header class="top">
+    <h1 class="brand">CoPet</h1>
+    <p class="tagline">Tiny pets for your Mac. Invite a friend — feed and pet sync live.</p>
+    <a class="cta" href="/CoPet.zip">Download for Mac ↓</a>
+  </header>
+
+  <div class="art-wrap">
+    <img src="/pets.png?v=copet" width="1200" height="640" alt="Pixel dog, octopus, and bird" />
+  </div>
 
   <section class="play">
-    <div class="play-inner">
-      <h2>How it works</h2>
-      <p>Two minutes. Then they’re living on both desktops.</p>
-      <ol class="steps">
-        <li><strong>Download</strong> &amp; open Mochi — pick dog, bird, or octopus.</li>
-        <li>Menu → <strong>Invite friend…</strong> (copies a code).</li>
-        <li>They claim it → you’re bonded. Feed, pet, poke, nap.</li>
-        <li>Drag them to a screen edge to tuck them in for a nap.</li>
-      </ol>
-      <p class="fix">
-        If Mac says the app is “damaged”, run
-        <code>FIX IF MAC SAYS DAMAGED.command</code>
-        inside the unzipped folder — Gatekeeper being dramatic, not a real break.
-      </p>
-    </div>
+    <h2>How it works</h2>
+    <p>Two minutes. Then they’re living on both desktops.</p>
+    <ol class="steps">
+      <li><strong>Download</strong> &amp; open CoPet — pick dog, bird, or octopus.</li>
+      <li>Menu → <strong>Invite friend…</strong> (copies a code).</li>
+      <li>They claim it → you’re bonded. Feed, pet, poke, nap.</li>
+      <li>Drag them to a screen edge to tuck them in for a nap.</li>
+    </ol>
+    <p class="fix">
+      If Mac says the app is “damaged”, run
+      <code>FIX IF MAC SAYS DAMAGED.command</code>
+      inside the unzipped folder — Gatekeeper being dramatic, not a real break.
+    </p>
   </section>
 </body>
 </html>

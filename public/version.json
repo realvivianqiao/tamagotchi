@@ -1,6 +1,6 @@
 {
-  "version": "0.4",
+  "version": "0.4.1",
   "url": "/CoPet.zip",
-  "notes": "Sparkle auto-updates. Download once more \u2014 after this, Check for updates\u2026 handles the rest.",
-  "publishedAt": "2026-10-16T01:44:56Z"
+  "notes": "Good morning from system time, plus optional local weather (no API key).",
+  "publishedAt": "2026-10-16T01:48:02Z"
 }

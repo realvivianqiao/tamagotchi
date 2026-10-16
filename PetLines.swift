@@ -340,4 +340,37 @@ enum PetLines {
       ]
     }
   }
+
+  // MARK: Time-of-day greetings
+
+  static func greeting(_ species: Species, _ part: Daypart) -> String {
+    let pool: [String] =
+      switch (species, part) {
+      case (.dog, .morning):
+        ["good morning!!", "morning wag!", "rise and shine!", "morning!!", "coffee time?"]
+      case (.dog, .afternoon):
+        ["good afternoon!", "afternoon woof", "hey — afternoon!", "happy afternoon", "midday hi"]
+      case (.dog, .evening):
+        ["good evening!", "evening wag", "cozy evening~", "hey evening!", "sunset woof"]
+      case (.dog, .night):
+        ["night owl?", "still up?", "late night woof", "hey night!", "moontime hi"]
+      case (.bird, .morning):
+        ["good morning!!", "morning chirp!", "sunrise tweet", "rise and sing!", "morning!!"]
+      case (.bird, .afternoon):
+        ["good afternoon!", "afternoon tweet", "midday chirp", "hey — afternoon!", "sunny hi"]
+      case (.bird, .evening):
+        ["good evening!", "evening tweet", "dusk chirp", "cozy evening~", "sunset song"]
+      case (.bird, .night):
+        ["night owl?", "still up?", "late night chirp", "moontime tweet", "quiet night~"]
+      case (.octopus, .morning):
+        ["good morning…", "morning bloop", "rise gently", "morning tide", "hello morning"]
+      case (.octopus, .afternoon):
+        ["good afternoon", "afternoon drift", "midday bloop", "hey — afternoon", "calm tide"]
+      case (.octopus, .evening):
+        ["good evening…", "evening bloop", "dusk drift", "cozy evening", "sunset ink"]
+      case (.octopus, .night):
+        ["night tide…", "still up?", "late night bloop", "moonlight drift", "quiet deep"]
+      }
+    return pool.randomElement()!
+  }
 }

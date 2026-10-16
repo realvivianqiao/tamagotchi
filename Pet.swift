@@ -85,6 +85,7 @@ import AppKit
 
     window.orderFrontRegardless()
     restoreNapIfNeeded()
+    wireAmbientGreetings()
 
     NotificationCenter.default.addObserver(
       forName: NSApplication.didChangeScreenParametersNotification,
@@ -97,6 +98,32 @@ import AppKit
 
     let timer = Timer(timeInterval: 1 / fps, target: self, selector: #selector(step), userInfo: nil, repeats: true)
     RunLoop.main.add(timer, forMode: .common)
+  }
+
+  /// Good morning / weather when the Mac wakes, the daypart changes, or the pad launches.
+  private func wireAmbientGreetings() {
+    // Launch greeting (skip if they left the pet napping).
+    Task { @MainActor in
+      try? await Task.sleep(nanoseconds: 2_500_000_000)
+      Ambient.shared.maybeGreet(species: species, asleep: isAsleep) { [weak self] text, secs in
+        self?.say(text, seconds: secs)
+      }
+    }
+    // Opening the laptop lid / waking from sleep → morning hello.
+    NSWorkspace.shared.notificationCenter.addObserver(
+      forName: NSWorkspace.didWakeNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      Task { @MainActor in
+        guard let self, !self.hidden else { return }
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        Ambient.shared.maybeGreet(species: self.species, asleep: self.isAsleep, force: true) {
+          [weak self] text, secs in
+          self?.say(text, seconds: secs)
+        }
+      }
+    }
   }
 
   private var partnerWasOnline = false
@@ -502,6 +529,12 @@ import AppKit
   /// Periodic check-ins while awake. Silent when you put them to sleep.
   private func chatter() {
     guard !hidden, !isAsleep else { return }
+    // Once per morning/afternoon/evening/night — soft daypart hello.
+    if tick % Int(60 * fps) == 0 {
+      Ambient.shared.maybeGreet(species: species, asleep: false) { [weak self] text, secs in
+        self?.say(text, seconds: secs, force: false)
+      }
+    }
     let hungry = fullness < 35
     let sad = happiness < 35
     let needy = hungry || sad
@@ -863,9 +896,13 @@ import AppKit
   @objc private func toggleNap() {
     if untilWoken || activity == .sleep {
       wakeStickyNap()
-      say(
-        species == .bird ? "morning chirp" :
-          species == .octopus ? "rise…" : "🥱")
+      let first = Ambient.shared.wakeLine(species: species)
+      say(first, seconds: 3.5)
+      Task { @MainActor in
+        await Ambient.shared.refreshWeatherIfNeeded()
+        let richer = Ambient.shared.wakeLine(species: self.species)
+        if richer != first { self.say(richer, seconds: 3.8) }
+      }
       pushOnline()
     } else {
       enterNap(sayLine: true)

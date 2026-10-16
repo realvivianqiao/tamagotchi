@@ -1,6 +1,6 @@
 {
-  "version": "0.5.7",
+  "version": "0.5.8",
   "url": "/CoPet.zip",
-  "notes": "Fix bond accept: clear success/error alerts; queue host notify if offline.",
-  "publishedAt": "2026-10-16T02:53:20Z"
+  "notes": "Visits spawn close, gesture together ~5s, short labels.",
+  "publishedAt": "2026-10-16T03:01:16Z"
 }

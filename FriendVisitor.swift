@@ -50,8 +50,11 @@ import AppKit
   var hostY: (() -> CGFloat)?
   /// Host should start their play animation when the visit reaches the play beat.
   var onPlayWithHost: (() -> Void)?
+  /// Fired when the visitor is close and the gesture starts (host should react *now*).
+  var onGestureStart: (() -> Void)?
   private let minGap: CGFloat = 260
-  private let visitGap: CGFloat = 95
+  /// Stand right beside the host during visits — not across the screen.
+  private let visitGap: CGFloat = 72
 
   init(
     code: String, name: String, species: Species, near hostX: CGFloat,
@@ -63,9 +66,10 @@ import AppKit
     self.ephemeral = ephemeral
     let screen = NSScreen.main!.visibleFrame
     let preferRight = hostX < screen.midX
-    // Ephemeral visits enter from off-screen for a clearer “jump in”.
+    // Visits pop in *next to* the host — a short hop, not a cross-screen walk.
     if ephemeral {
-      x = preferRight ? screen.maxX - 40 : screen.minX + 40
+      let side: CGFloat = preferRight ? 1 : -1
+      x = min(max(hostX + side * 110, screen.minX + 80), screen.maxX - 80)
     } else {
       let parked = preferRight ? hostX + 300 : hostX - 300
       x = min(max(parked, screen.minX + 100), screen.maxX - 100)
@@ -107,13 +111,14 @@ import AppKit
     hostX = nil
     hostY = nil
     onPlayWithHost = nil
+    onGestureStart = nil
     onVisitDone = nil
     view.visitor = nil
     window.orderOut(nil)
     window.close()
   }
 
-  /// Brief scripted visit: approach → species gesture → leave (and dismiss if ephemeral).
+  /// ~5s visit: tiny approach → gesture beside host → quick exit.
   func beginVisit(
     action: String,
     label: String,
@@ -130,21 +135,25 @@ import AppKit
     onVisitDone = onDone
     untilWoken = false
     showNameplate = true
-    say(label, seconds: 3.2)
-    // Face the host and start approaching.
+    // Short label — clears before the gesture finishes.
+    say(label, seconds: 1.1)
     if let hx = hostX?() {
       dir = hx >= x ? 1 : -1
+      // Re-snap close in case host moved since init.
+      let side: CGFloat = x >= hx ? 1 : -1
+      let screen = NSScreen.main!.visibleFrame
+      x = min(max(hx + side * 100, screen.minX + 70), screen.maxX - 70)
     }
     switch species {
     case .bird:
-      y = (hostY?() ?? NSScreen.main!.visibleFrame.minY) + 40
-      set(.fly, seconds: 8)
+      y = (hostY?() ?? NSScreen.main!.visibleFrame.minY) + 36
+      set(.fly, seconds: 5)
     case .octopus:
       y = NSScreen.main!.visibleFrame.minY + 22
-      set(.glide, seconds: 8)
+      set(.glide, seconds: 5)
     case .dog:
       y = NSScreen.main!.visibleFrame.minY
-      set(.run, seconds: 8)
+      set(.run, seconds: 5)
     }
   }
 
@@ -265,124 +274,126 @@ import AppKit
     let margin = spriteSize.width / 2 - 16
 
     switch visitPhase {
-    case 0: // approach
+    case 0: // micro-approach (~0.35s) — already nearby
       dir = hx >= x ? 1 : -1
-      let speed: CGFloat = species == .dog ? 2.2 : (species == .bird ? 1.8 : 1.4)
+      let speed: CGFloat = 4.5
       let dx = hx - x
       if abs(dx) > visitGap {
         x += (dx > 0 ? 1 : -1) * speed
+      }
+      if species == .bird {
+        y += ((hy + 32) - y) * 0.25
+      } else if species == .octopus {
+        y += (max(vf.minY + 16, hy) - y) * 0.2
       } else {
+        y = vf.minY
+      }
+      // Always start the gesture quickly even if slightly short of gap.
+      if abs(hx - x) <= visitGap + 8 || visitTicks >= Int(0.35 * fps) {
         visitPhase = 1
         visitTicks = 0
         startVisitGesture(hostX: hx, hostY: hy)
       }
-      // Match height loosely.
-      if species == .bird {
-        let targetY = hy + 36
-        y += (targetY - y) * 0.12
-      } else if species == .octopus {
-        let targetY = max(vf.minY + 16, hy)
-        y += (targetY - y) * 0.1
-      } else {
-        y = vf.minY
-      }
 
-    case 1: // gesture
+    case 1: // gesture (~2.6s) — tight beside host, lots of motion
       dir = hx >= x ? 1 : -1
-      // Keep close beside host.
       let side: CGFloat = x < hx ? -1 : 1
       let ideal = hx + side * visitGap
-      x += (ideal - x) * 0.15
+      x += (ideal - x) * 0.35
       runVisitGestureTick(hostX: hx, hostY: hy)
-      let gestureLen = visitGestureDuration
-      if visitTicks >= gestureLen {
+      // Drop the label mid-gesture so it doesn’t linger.
+      if visitTicks == Int(1.0 * fps) {
+        bubble = nil
+        bubbleTicks = 0
+      }
+      if visitTicks >= visitGestureDuration {
         visitPhase = 2
         visitTicks = 0
-        // Walk toward the nearer edge to leave.
-        let goRight = x > vf.midX
-        dir = goRight ? 1 : -1
+        bubble = nil
+        bubbleTicks = 0
+        dir = x >= hx ? 1 : -1
         switch species {
-        case .dog: set(.run, seconds: 3)
-        case .bird: set(.fly, seconds: 3)
-        case .octopus: set(.glide, seconds: 3)
+        case .dog: set(.run, seconds: 1.2)
+        case .bird: set(.fly, seconds: 1.2)
+        case .octopus: set(.glide, seconds: 1.2)
         }
       }
 
-    default: // leave
-      let speed: CGFloat = species == .dog ? 2.6 : 2.0
-      x += dir * speed
-      if species == .bird { y += 0.6 }
-      let off = x < vf.minX - 40 || x > vf.maxX + 40
-      if off || visitTicks > Int(2.5 * fps) {
+    default: // quick exit (~1.2s) then gone
+      x += dir * 5.5
+      if species == .bird { y += 1.2 }
+      if visitTicks > Int(1.15 * fps) {
         finishVisit()
         return
       }
     }
 
-    x = min(max(x, vf.minX + margin - 80), vf.maxX - margin + 80)
+    x = min(max(x, vf.minX + margin - 40), vf.maxX - margin + 40)
   }
 
+  /// Gesture window — keep total visit ≈ 5s with approach + exit.
   private var visitGestureDuration: Int {
     switch visitAction {
-    case "play": return Int(4.5 * fps)
-    case "nap": return Int(3.0 * fps)
-    default: return Int(3.2 * fps)
+    case "play": return Int(2.8 * fps)
+    case "nap": return Int(2.2 * fps)
+    default: return Int(2.5 * fps)
     }
   }
 
   private func startVisitGesture(hostX hx: CGFloat, hostY hy: CGFloat) {
-    if let label = visitLabel { say(label, seconds: 2.8) }
+    // Host reacts when we’re actually close — not while we’re spawning.
+    onGestureStart?()
     switch visitAction {
     case "pet":
-      happyTicks = Int(3 * fps)
+      happyTicks = Int(2.5 * fps)
       angryTicks = 0
       switch species {
       case .dog:
-        set(.sit, seconds: 4)
-        pawTicks = Int(2.2 * fps)
-        emit("❤️", count: 5)
+        set(.sit, seconds: 2.6)
+        pawTicks = Int(2.0 * fps)
+        emit("❤️", count: 6)
         hop()
       case .bird:
-        set(.fly, seconds: 4)
-        y = hy + 50
-        emit("✨", count: 4)
-        emit("❤️", count: 2)
+        set(.fly, seconds: 2.6)
+        y = hy + 40
+        emit("✨", count: 5)
+        emit("❤️", count: 3)
       case .octopus:
-        set(.glide, seconds: 4)
-        emit("🫧", count: 4)
-        emit("❤️", count: 2)
+        set(.glide, seconds: 2.6)
+        emit("🫧", count: 5)
+        emit("❤️", count: 3)
       }
     case "poke":
-      angryTicks = Int(3 * fps)
+      angryTicks = Int(2.2 * fps)
       happyTicks = 0
-      emit("💢", count: 4)
+      emit("💢", count: 5)
       switch species {
       case .dog:
         set(.run, seconds: 2)
         hop()
       case .bird:
-        set(.fly, seconds: 2.5)
+        set(.fly, seconds: 2)
       case .octopus:
-        set(.glide, seconds: 2.5)
+        set(.glide, seconds: 2)
         emit("🖤", count: 2)
       }
     case "feed":
-      set(.eat, seconds: 3.5)
+      set(.eat, seconds: 2.4)
       switch species {
-      case .dog: emit("🍖", count: 2)
-      case .bird: emit("seed", count: 3)
-      case .octopus: emit("🦀", count: 2)
+      case .dog: emit("🍖", count: 3)
+      case .bird: emit("seed", count: 4)
+      case .octopus: emit("🦀", count: 3)
       }
     case "play":
-      signaturePlay(seconds: 4.5)
-      emit(species == .dog ? "🎾" : (species == .bird ? "🪶" : "🫧"), count: 2)
+      signaturePlay(seconds: 2.8)
+      emit(species == .dog ? "🎾" : (species == .bird ? "🪶" : "🫧"), count: 3)
       if !playKickoffSent {
         playKickoffSent = true
         onPlayWithHost?()
       }
     case "nap":
       untilWoken = true
-      set(.sleep, seconds: 3)
+      set(.sleep, seconds: 2.2)
       emit("💤", count: 2)
     default:
       set(.sit, seconds: 2)
@@ -392,37 +403,51 @@ import AppKit
   private func runVisitGestureTick(hostX hx: CGFloat, hostY hy: CGFloat) {
     switch visitAction {
     case "pet":
-      if species == .dog, visitTicks % 18 == 0, visitTicks < Int(2.5 * fps) {
-        hop()
-        emit("❤️")
-        pawTicks = max(pawTicks, 12)
+      // Bounce into the host — reads as actual pats, not standing still.
+      if species == .dog {
+        if visitTicks % 10 == 0 {
+          hop()
+          emit("❤️", count: 2)
+          pawTicks = max(pawTicks, 14)
+        }
+        // Nudge slightly toward host on each pat.
+        x += (hx - x) * 0.08
       }
-      if species == .bird, visitTicks % 12 == 0 {
-        y = hy + 40 + CGFloat(sin(Double(visitTicks) / 6)) * 8
-        if visitTicks % 24 == 0 { emit("❤️") }
+      if species == .bird {
+        y = hy + 28 + CGFloat(sin(Double(visitTicks) / 4)) * 10
+        x += (hx - x) * 0.1
+        if visitTicks % 8 == 0 { emit("❤️"); emit("✨") }
       }
-      if species == .octopus, visitTicks % 20 == 0 { emit("🫧") }
+      if species == .octopus {
+        y = max(NSScreen.main!.visibleFrame.minY + 12, hy + CGFloat(sin(Double(visitTicks) / 5)) * 8)
+        x += (hx - x) * 0.1
+        if visitTicks % 9 == 0 { emit("🫧"); emit("❤️") }
+      }
     case "play":
-      // Circle / weave around the host so it reads as playing together.
       let t = Double(visitTicks) / fps
-      let orbit = CGFloat(sin(t * 3.2)) * 70
+      let orbit = CGFloat(sin(t * 5.5)) * 55
       let ideal = hx + orbit
-      x += (ideal - x) * 0.2
+      x += (ideal - x) * 0.35
       dir = (ideal >= x) ? 1 : -1
       if species == .bird {
-        y = hy + 55 + CGFloat(sin(t * 4)) * 12
+        y = hy + 40 + CGFloat(sin(t * 6)) * 14
       } else if species == .octopus {
-        y = max(NSScreen.main!.visibleFrame.minY + 14, hy + CGFloat(sin(t * 2.5)) * 10)
+        y = max(NSScreen.main!.visibleFrame.minY + 14, hy + CGFloat(sin(t * 4)) * 10)
       } else {
         y = NSScreen.main!.visibleFrame.minY
+        if visitTicks % 8 == 0 { hop() }
       }
-      if visitTicks % 20 == 0 {
+      if visitTicks % 10 == 0 {
         emit(species == .dog ? "💨" : (species == .bird ? "✨" : "🫧"))
       }
     case "poke":
-      if visitTicks % 14 == 0 { emit("💢") }
+      if visitTicks % 8 == 0 {
+        emit("💢", count: 2)
+        hop()
+        x += (hx - x) * 0.15
+      }
     case "feed":
-      if visitTicks % 16 == 0 {
+      if visitTicks % 10 == 0 {
         switch species {
         case .dog: emit("🍖")
         case .bird: emit("seed")

@@ -1012,9 +1012,8 @@ import AppKit
       action: action,
       label: label,
       role: .outgoingTarget,
-      ephemeral: visitor?.code != code)
-    // Your pet also performs the gesture toward the visitor.
-    performHostSideVisit(action: action)
+      ephemeral: visitor?.code != code,
+      deferHostReaction: true)
   }
 
   /// Friend's pet jumps onto your screen, does a species gesture, then leaves.
@@ -1032,6 +1031,7 @@ import AppKit
       extra: ["fromSpecies": visitSpecies.rawValue])
     let label = Self.visitLabel(
       actor: visitName, action: action, toward: "you", incoming: true)
+    // Host reacts when the visitor is beside them (onGestureStart) — not at spawn.
     presentVisit(
       code: visitCode,
       name: visitName,
@@ -1039,14 +1039,8 @@ import AppKit
       action: action,
       label: label,
       role: .incomingActor,
-      ephemeral: true)
-    // Stats / your pet's reaction — play waits for the visit beat via onPlayWithHost.
-    if action != "play" {
-      playRemote(action)
-    } else {
-      // Soften: still bump happiness; animation kicks off when visitor starts playing.
-      happiness = min(100, happiness + 12)
-    }
+      ephemeral: true,
+      deferHostReaction: true)
   }
 
   private func presentVisit(
@@ -1056,7 +1050,8 @@ import AppKit
     action: String,
     label: String,
     role: FriendVisitor.VisitRole,
-    ephemeral: Bool
+    ephemeral: Bool,
+    deferHostReaction: Bool = false
   ) {
     let reuse = visitor?.code == code ? visitor : nil
     if reuse == nil {
@@ -1074,51 +1069,61 @@ import AppKit
     v.hostX = { [weak self] in self?.x ?? 0 }
     v.hostY = { [weak self] in self?.y ?? 0 }
     v.onPlayWithHost = { [weak self] in
+      self?.startSignatureMove(seconds: 2.8)
+    }
+    v.onGestureStart = { [weak self] in
       guard let self else { return }
-      if role == .incomingActor {
-        self.startSignatureMove(seconds: 5)
-      } else {
-        self.startSignatureMove(seconds: 5)
+      // Clear the brief label so it doesn’t stick through the whole visit.
+      self.bubble = nil
+      self.bubbleTicks = 0
+      if role == .incomingActor, deferHostReaction {
+        if action == "play" {
+          self.happiness = min(100, self.happiness + 12)
+        } else {
+          self.playRemote(action)
+        }
+      } else if role == .outgoingTarget {
+        self.performHostSideVisit(action: action)
       }
     }
     let wasEphemeral = ephemeral && reuse == nil
     v.beginVisit(action: action, label: label, role: role) { [weak self] in
       guard let self else { return }
+      self.bubble = nil
+      self.bubbleTicks = 0
       if wasEphemeral, self.visitor?.code == code {
         self.visitor?.dismiss()
         self.visitor = nil
       }
     }
-    say(label, seconds: 2.8)
+    // Flash the label once — short — then gesture takes over.
+    say(label, seconds: 1.1)
   }
 
   private func performHostSideVisit(action: String) {
     switch action {
     case "pet":
-      // Your pet delivers the pats (species flavor).
-      happyTicks = Int(2.5 * fps)
+      happyTicks = Int(2.2 * fps)
       switch species {
       case .dog:
-        emit("❤️", count: 4)
+        emit("❤️", count: 5)
         hop()
       case .bird:
-        emit("✨", count: 3)
-        set(.fly, seconds: 2.5)
+        emit("✨", count: 4)
+        set(.fly, seconds: 2.2)
       case .octopus:
-        emit("🫧", count: 3)
-        set(.glide, seconds: 2.5)
+        emit("🫧", count: 4)
+        set(.glide, seconds: 2.2)
       }
     case "poke":
-      // You're poking *them* — a playful jab, not getting mad yourself.
-      emit("💢", count: 2)
+      emit("💢", count: 3)
       hop()
     case "feed":
-      set(.eat, seconds: 2.5)
+      set(.eat, seconds: 2.2)
       emit(species == .bird ? "seed" : (species == .octopus ? "🦀" : "🍖"))
     case "play":
       break // kicked off together via visitor onPlayWithHost
     case "nap":
-      // You're tucking *them* in — don't nap yourself.
       emit("💤", count: 2)
     default:
       break

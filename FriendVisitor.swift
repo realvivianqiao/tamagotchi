@@ -1,10 +1,19 @@
 import AppKit
 
-/// A friend's pet on your desktop — their species, reacts when you interact with them.
+/// A friend's pet on your desktop — idle visitor, or a brief cross-screen visit gesture.
 @MainActor final class FriendVisitor {
+  enum VisitRole {
+    /// Friend's pet arrives on *your* screen and acts on you.
+    case incomingActor
+    /// Friend's pet appears so *your* pet can act on them (local mirror).
+    case outgoingTarget
+  }
+
   let code: String
   private(set) var name: String
   private(set) var species: Species
+  /// True when this window should auto-dismiss after a visit finishes.
+  private(set) var ephemeral = false
 
   private let window: NSPanel
   private let view = VisitorView()
@@ -13,7 +22,6 @@ import AppKit
   private var dir: CGFloat = -1
   private var activity: Pet.Activity = .sit
   private var activityTicks = 0
-  /// Match host pet: one axis per bout so visitors are grab-able.
   private var wanderHorizontal = true
   private var wanderLock: CGFloat?
   private var tick = 0, walkFrame = 0, happyTicks = 0, angryTicks = 0, blinkTicks = 0, bubbleTicks = 0
@@ -24,21 +32,46 @@ import AppKit
   private var sprite: Sprite
   private var sprites: [Look: Sprite] = [:]
   private var timer: Timer?
-  /// Host pet X — keep clear so the two don't stack.
-  var hostX: (() -> CGFloat)?
-  private let minGap: CGFloat = 260
+  /// Raised-paw / special gesture pose for a few frames.
+  private var pawTicks = 0
+  private var showNameplate = true
 
-  init(code: String, name: String, species: Species, near hostX: CGFloat) {
+  // Visit choreography
+  private var visiting = false
+  private var visitRole: VisitRole = .incomingActor
+  private var visitAction = ""
+  private var visitPhase = 0 // 0 approach, 1 gesture, 2 leave
+  private var visitTicks = 0
+  private var visitLabel: String?
+  private var onVisitDone: (() -> Void)?
+  private var playKickoffSent = false
+
+  var hostX: (() -> CGFloat)?
+  var hostY: (() -> CGFloat)?
+  /// Host should start their play animation when the visit reaches the play beat.
+  var onPlayWithHost: (() -> Void)?
+  private let minGap: CGFloat = 260
+  private let visitGap: CGFloat = 95
+
+  init(
+    code: String, name: String, species: Species, near hostX: CGFloat,
+    ephemeral: Bool = false, quiet: Bool = false
+  ) {
     self.code = code
     self.name = name
     self.species = species
+    self.ephemeral = ephemeral
     let screen = NSScreen.main!.visibleFrame
-    // Park on the opposite side of the host with a wide gap (windows are ~300pt).
     let preferRight = hostX < screen.midX
-    let parked = preferRight ? hostX + 300 : hostX - 300
-    x = min(max(parked, screen.minX + 100), screen.maxX - 100)
+    // Ephemeral visits enter from off-screen for a clearer “jump in”.
+    if ephemeral {
+      x = preferRight ? screen.maxX - 40 : screen.minX + 40
+    } else {
+      let parked = preferRight ? hostX + 300 : hostX - 300
+      x = min(max(parked, screen.minX + 100), screen.maxX - 100)
+    }
     y = screen.minY
-    dir = preferRight ? -1 : 1 // face toward host
+    dir = preferRight ? -1 : 1
     sprite = Dog.sprite(Look(species: species, pose: .sit))
     window = NSPanel(
       contentRect: CGRect(origin: .zero, size: windowSize), styleMask: [.borderless, .nonactivatingPanel],
@@ -52,7 +85,9 @@ import AppKit
     window.contentView = view
     view.visitor = self
     window.orderFrontRegardless()
-    say("hi from \(name) \(species.emoji)", seconds: 2.5)
+    if !quiet {
+      say("hi from \(name) \(species.emoji)", seconds: 2.5)
+    }
     timer = Timer.scheduledTimer(withTimeInterval: 1 / fps, repeats: true) { [weak self] _ in
       Task { @MainActor in self?.step() }
     }
@@ -70,13 +105,52 @@ import AppKit
     timer?.invalidate()
     timer = nil
     hostX = nil
+    hostY = nil
+    onPlayWithHost = nil
+    onVisitDone = nil
     view.visitor = nil
     window.orderOut(nil)
     window.close()
   }
 
-  /// Local preview of an action you sent to this friend.
+  /// Brief scripted visit: approach → species gesture → leave (and dismiss if ephemeral).
+  func beginVisit(
+    action: String,
+    label: String,
+    role: VisitRole,
+    onDone: (() -> Void)? = nil
+  ) {
+    visiting = true
+    visitRole = role
+    visitAction = action
+    visitPhase = 0
+    visitTicks = 0
+    visitLabel = label
+    playKickoffSent = false
+    onVisitDone = onDone
+    untilWoken = false
+    showNameplate = true
+    say(label, seconds: 3.2)
+    // Face the host and start approaching.
+    if let hx = hostX?() {
+      dir = hx >= x ? 1 : -1
+    }
+    switch species {
+    case .bird:
+      y = (hostY?() ?? NSScreen.main!.visibleFrame.minY) + 40
+      set(.fly, seconds: 8)
+    case .octopus:
+      y = NSScreen.main!.visibleFrame.minY + 22
+      set(.glide, seconds: 8)
+    case .dog:
+      y = NSScreen.main!.visibleFrame.minY
+      set(.run, seconds: 8)
+    }
+  }
+
+  /// Local preview of an action you sent (idle visitor, not a full visit).
   func play(_ action: String) {
+    if visiting { return }
     switch action {
     case "feed":
       set(.eat, seconds: 3)
@@ -142,6 +216,7 @@ import AppKit
     tick += 1
     happyTicks = max(0, happyTicks - 1)
     angryTicks = max(0, angryTicks - 1)
+    if pawTicks > 0 { pawTicks -= 1 }
     if blinkTicks > 0 { blinkTicks -= 1 } else if Int.random(in: 0..<150) == 0 { blinkTicks = 4 }
     if bubbleTicks > 0 {
       bubbleTicks -= 1
@@ -160,6 +235,218 @@ import AppKit
       particles.removeAll { $0.text == "💤" && $0.vel == .zero }
     }
 
+    if visiting {
+      stepVisit()
+    } else {
+      stepIdle()
+    }
+
+    if tick % (activity == .run || activity == .fly || pawTicks > 0 ? 7 : 14) == 0 {
+      walkFrame ^= 1
+    }
+    for i in particles.indices {
+      if particles[i].vel == .zero {
+        particles[i].life = particles[i].maxLife
+        continue
+      }
+      particles[i].pos.x += particles[i].vel.dx
+      particles[i].pos.y += particles[i].vel.dy
+      particles[i].life -= 1
+    }
+    particles.removeAll { $0.life <= 0 }
+    render()
+  }
+
+  private func stepVisit() {
+    visitTicks += 1
+    let hx = hostX?() ?? x
+    let hy = hostY?() ?? y
+    let vf = NSScreen.main!.visibleFrame
+    let margin = spriteSize.width / 2 - 16
+
+    switch visitPhase {
+    case 0: // approach
+      dir = hx >= x ? 1 : -1
+      let speed: CGFloat = species == .dog ? 2.2 : (species == .bird ? 1.8 : 1.4)
+      let dx = hx - x
+      if abs(dx) > visitGap {
+        x += (dx > 0 ? 1 : -1) * speed
+      } else {
+        visitPhase = 1
+        visitTicks = 0
+        startVisitGesture(hostX: hx, hostY: hy)
+      }
+      // Match height loosely.
+      if species == .bird {
+        let targetY = hy + 36
+        y += (targetY - y) * 0.12
+      } else if species == .octopus {
+        let targetY = max(vf.minY + 16, hy)
+        y += (targetY - y) * 0.1
+      } else {
+        y = vf.minY
+      }
+
+    case 1: // gesture
+      dir = hx >= x ? 1 : -1
+      // Keep close beside host.
+      let side: CGFloat = x < hx ? -1 : 1
+      let ideal = hx + side * visitGap
+      x += (ideal - x) * 0.15
+      runVisitGestureTick(hostX: hx, hostY: hy)
+      let gestureLen = visitGestureDuration
+      if visitTicks >= gestureLen {
+        visitPhase = 2
+        visitTicks = 0
+        // Walk toward the nearer edge to leave.
+        let goRight = x > vf.midX
+        dir = goRight ? 1 : -1
+        switch species {
+        case .dog: set(.run, seconds: 3)
+        case .bird: set(.fly, seconds: 3)
+        case .octopus: set(.glide, seconds: 3)
+        }
+      }
+
+    default: // leave
+      let speed: CGFloat = species == .dog ? 2.6 : 2.0
+      x += dir * speed
+      if species == .bird { y += 0.6 }
+      let off = x < vf.minX - 40 || x > vf.maxX + 40
+      if off || visitTicks > Int(2.5 * fps) {
+        finishVisit()
+        return
+      }
+    }
+
+    x = min(max(x, vf.minX + margin - 80), vf.maxX - margin + 80)
+  }
+
+  private var visitGestureDuration: Int {
+    switch visitAction {
+    case "play": return Int(4.5 * fps)
+    case "nap": return Int(3.0 * fps)
+    default: return Int(3.2 * fps)
+    }
+  }
+
+  private func startVisitGesture(hostX hx: CGFloat, hostY hy: CGFloat) {
+    if let label = visitLabel { say(label, seconds: 2.8) }
+    switch visitAction {
+    case "pet":
+      happyTicks = Int(3 * fps)
+      angryTicks = 0
+      switch species {
+      case .dog:
+        set(.sit, seconds: 4)
+        pawTicks = Int(2.2 * fps)
+        emit("❤️", count: 5)
+        hop()
+      case .bird:
+        set(.fly, seconds: 4)
+        y = hy + 50
+        emit("✨", count: 4)
+        emit("❤️", count: 2)
+      case .octopus:
+        set(.glide, seconds: 4)
+        emit("🫧", count: 4)
+        emit("❤️", count: 2)
+      }
+    case "poke":
+      angryTicks = Int(3 * fps)
+      happyTicks = 0
+      emit("💢", count: 4)
+      switch species {
+      case .dog:
+        set(.run, seconds: 2)
+        hop()
+      case .bird:
+        set(.fly, seconds: 2.5)
+      case .octopus:
+        set(.glide, seconds: 2.5)
+        emit("🖤", count: 2)
+      }
+    case "feed":
+      set(.eat, seconds: 3.5)
+      switch species {
+      case .dog: emit("🍖", count: 2)
+      case .bird: emit("seed", count: 3)
+      case .octopus: emit("🦀", count: 2)
+      }
+    case "play":
+      signaturePlay(seconds: 4.5)
+      emit(species == .dog ? "🎾" : (species == .bird ? "🪶" : "🫧"), count: 2)
+      if !playKickoffSent {
+        playKickoffSent = true
+        onPlayWithHost?()
+      }
+    case "nap":
+      untilWoken = true
+      set(.sleep, seconds: 3)
+      emit("💤", count: 2)
+    default:
+      set(.sit, seconds: 2)
+    }
+  }
+
+  private func runVisitGestureTick(hostX hx: CGFloat, hostY hy: CGFloat) {
+    switch visitAction {
+    case "pet":
+      if species == .dog, visitTicks % 18 == 0, visitTicks < Int(2.5 * fps) {
+        hop()
+        emit("❤️")
+        pawTicks = max(pawTicks, 12)
+      }
+      if species == .bird, visitTicks % 12 == 0 {
+        y = hy + 40 + CGFloat(sin(Double(visitTicks) / 6)) * 8
+        if visitTicks % 24 == 0 { emit("❤️") }
+      }
+      if species == .octopus, visitTicks % 20 == 0 { emit("🫧") }
+    case "play":
+      // Circle / weave around the host so it reads as playing together.
+      let t = Double(visitTicks) / fps
+      let orbit = CGFloat(sin(t * 3.2)) * 70
+      let ideal = hx + orbit
+      x += (ideal - x) * 0.2
+      dir = (ideal >= x) ? 1 : -1
+      if species == .bird {
+        y = hy + 55 + CGFloat(sin(t * 4)) * 12
+      } else if species == .octopus {
+        y = max(NSScreen.main!.visibleFrame.minY + 14, hy + CGFloat(sin(t * 2.5)) * 10)
+      } else {
+        y = NSScreen.main!.visibleFrame.minY
+      }
+      if visitTicks % 20 == 0 {
+        emit(species == .dog ? "💨" : (species == .bird ? "✨" : "🫧"))
+      }
+    case "poke":
+      if visitTicks % 14 == 0 { emit("💢") }
+    case "feed":
+      if visitTicks % 16 == 0 {
+        switch species {
+        case .dog: emit("🍖")
+        case .bird: emit("seed")
+        case .octopus: emit("🦀")
+        }
+      }
+    default:
+      break
+    }
+  }
+
+  private func finishVisit() {
+    visiting = false
+    let done = onVisitDone
+    onVisitDone = nil
+    if ephemeral {
+      done?()
+    } else {
+      set(.sit, seconds: 2)
+      done?()
+    }
+  }
+
+  private func stepIdle() {
     let vf0 = NSScreen.main!.visibleFrame
     switch activity {
     case .walk:
@@ -206,13 +493,10 @@ import AppKit
       }
     }
 
-    // Stay clear of the host pet.
     if let hx = hostX?(), abs(x - hx) < minGap {
       dir = x < hx ? -1 : 1
       x += dir * 4
-      if activity == .sit || activity == .eat || activity == .sleep {
-        // nudge without breaking nap/eat too hard
-      } else {
+      if activity != .sit && activity != .eat && activity != .sleep {
         set(.walk, seconds: 2)
       }
     }
@@ -231,7 +515,6 @@ import AppKit
           untilWoken = false
           set(.sit, seconds: 2)
         } else if Int.random(in: 0..<3) == 0 {
-          // Prefer ground walks (horizontal); rare aerial bout for bird/octopus visitors.
           if species == .bird, Int.random(in: 0..<3) == 0 {
             set(.fly, seconds: Double.random(in: 4...8))
             wanderHorizontal = Int.random(in: 0..<5) != 0
@@ -254,19 +537,6 @@ import AppKit
         }
       }
     }
-
-    if tick % (activity == .run || activity == .fly ? 7 : 14) == 0 { walkFrame ^= 1 }
-    for i in particles.indices {
-      if particles[i].vel == .zero {
-        particles[i].life = particles[i].maxLife
-        continue
-      }
-      particles[i].pos.x += particles[i].vel.dx
-      particles[i].pos.y += particles[i].vel.dy
-      particles[i].life -= 1
-    }
-    particles.removeAll { $0.life <= 0 }
-    render()
   }
 
   private func set(_ next: Pet.Activity, seconds: Double) {
@@ -303,13 +573,18 @@ import AppKit
 
   private var look: Look {
     let angry = angryTicks > 0
-    let happy = !angry && (happyTicks > 0 || activity == .eat || activity == .run)
+    let happy = !angry && (happyTicks > 0 || activity == .eat || activity == .run || pawTicks > 0)
     var l = Look(species: species)
-    switch activity {
-    case .walk, .run, .fly: l.pose = .walk(walkFrame)
-    case .glide, .sit, .eat: l.pose = .sit
-    case .sleep: l.pose = .lie
-    case .held, .fall: l.pose = .hang
+    if pawTicks > 0, species == .dog {
+      // Hang pose reads as a lifted stance — used as the “raise a paw” pat.
+      l.pose = .hang
+    } else {
+      switch activity {
+      case .walk, .run, .fly: l.pose = .walk(walkFrame)
+      case .glide, .sit, .eat: l.pose = .sit
+      case .sleep: l.pose = .lie
+      case .held, .fall: l.pose = .hang
+      }
     }
     if activity == .sleep || (blinkTicks > 0 && !angry) {
       l.eyes = .closed
@@ -346,7 +621,10 @@ import AppKit
   fileprivate var drawSprite: Sprite { sprite }
   fileprivate var drawBubble: String? { bubble }
   fileprivate var drawParticles: [Particle] { particles }
-  fileprivate var drawName: String { "\(name) \(species.emoji)" }
+  fileprivate var drawNameplate: String? {
+    guard showNameplate else { return nil }
+    return "\(name) \(species.emoji)"
+  }
 }
 
 @MainActor private final class VisitorView: NSView {
@@ -371,9 +649,33 @@ import AppKit
         at: p.pos,
         withAttributes: [.font: NSFont.systemFont(ofSize: 16), .foregroundColor: NSColor.black.withAlphaComponent(alpha)])
     }
+    if let plate = visitor.drawNameplate {
+      drawNameplate(plate, under: rect)
+    }
     if let text = visitor.drawBubble {
       drawBubble(text, at: visitor.headPoint)
     }
+  }
+
+  private func drawNameplate(_ text: String, under rect: CGRect) {
+    let attrs: [NSAttributedString.Key: Any] = [
+      .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+      .foregroundColor: NSColor(white: 0.12, alpha: 1),
+    ]
+    let size = (text as NSString).size(withAttributes: attrs)
+    var box = CGRect(
+      x: rect.midX - size.width / 2 - 6,
+      y: rect.maxY + 2,
+      width: size.width + 12,
+      height: size.height + 4)
+    box.origin.x = min(max(box.minX, 2), bounds.width - box.width - 2)
+    let path = NSBezierPath(roundedRect: box, xRadius: 6, yRadius: 6)
+    NSColor.white.withAlphaComponent(0.92).setFill()
+    path.fill()
+    NSColor(srgbRed: 0.29, green: 0.17, blue: 0.07, alpha: 0.85).setStroke()
+    path.lineWidth = 1
+    path.stroke()
+    (text as NSString).draw(at: CGPoint(x: box.minX + 6, y: box.minY + 2), withAttributes: attrs)
   }
 
   private func drawBubble(_ text: String, at head: CGPoint) {

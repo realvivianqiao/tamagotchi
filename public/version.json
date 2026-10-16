@@ -1,6 +1,6 @@
 {
-  "version": "0.5.3",
+  "version": "0.5.4",
   "url": "/CoPet.zip",
-  "notes": "Pets bounce (with squash) when dropped from height.",
-  "publishedAt": "2026-10-16T02:19:52Z"
+  "notes": "Friend actions visit your screen \u2014 pets jump over, gesture, then leave (both sides see it).",
+  "publishedAt": "2026-10-16T02:25:49Z"
 }

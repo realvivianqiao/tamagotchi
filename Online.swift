@@ -150,7 +150,8 @@ struct FriendBond: Codable, Equatable {
   var partnerOnline: Bool { activeFriend?.online ?? false }
   var isBonded: Bool { friends.contains { !$0.waiting } }
 
-  var onSync: ((Double, Double, String?, String) -> Void)?
+  /// fullness, happiness, action, fromName, roomCode, fromSpecies
+  var onSync: ((Double, Double, String?, String, String?, String?) -> Void)?
   var onStatus: ((String) -> Void)?
   var onPresence: (() -> Void)?
   var onFriendsChanged: (() -> Void)?
@@ -666,7 +667,8 @@ struct FriendBond: Codable, Equatable {
         saveFriends()
       }
       // Actions from a friend land on *your* dog. Stats in the callback are ignored by Pet.
-      onSync?(f, h, action, from)
+      let fromSpecies = json["species"] as? String
+      onSync?(f, h, action, from, code, fromSpecies)
       onFriendsChanged?()
 
     case "system":

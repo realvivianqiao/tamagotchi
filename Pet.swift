@@ -160,22 +160,14 @@ import AppKit
       }
       self.partnerWasOnline = online
     }
-    // Friend sent an action at *you* — your dog reacts. Never rename your pet to `from`.
-    Online.shared.onSync = { [weak self] _, _, action, from in
+    // Friend sent an action at *you* — their pet visits your screen, then your pet reacts.
+    Online.shared.onSync = { [weak self] _, _, action, from, code, fromSpecies in
       guard let self, let action, !self.hidden else { return }
       self.applyingRemote = true
-      self.playRemote(action)
       let who = from.isEmpty ? "friend" : from
-      let line: String =
-        switch action {
-        case "feed": "\(who) fed you! 🍖"
-        case "play": "\(who) wants to play! 🎾"
-        case "pet": "\(who) pet you! ❤️"
-        case "nap": "\(who) tucked you in 💤"
-        case "poke": "\(who) poked you! 💢"
-        default: "\(who) → \(action)"
-        }
-      self.say(line, seconds: 2.5)
+      let sp = Species.parse(fromSpecies ?? "")
+      self.receiveFriendVisit(
+        action: action, fromName: who, code: code, species: sp)
       self.applyingRemote = false
       self.save()
       // Publish *your* new stats so their Friends list shows the real result.
@@ -962,24 +954,152 @@ import AppKit
     }
   }
 
-  /// Send an action at a friend — their pet reacts on *their* screen (+ visitor preview here).
+  /// Send an action at a friend — their pet visits *here* for the gesture; theirs also visits *them*.
   /// Carries *your* stats only so they can refresh your FriendBond row — never renames anyone.
   private func sendToFriend(action: String, code: String, name: String) {
     Online.shared.setActive(code: code)
     Online.shared.sync(fullness: fullness, happiness: happiness, action: action, toCode: code)
-    if visitor?.code == code {
-      visitor?.play(action)
+    let friendSpecies =
+      Online.shared.friends.first(where: { $0.code == code })?.petSpecies ?? .dog
+    let label = Self.visitLabel(actor: petName, action: action, toward: name, incoming: false)
+    presentVisit(
+      code: code,
+      name: name,
+      species: friendSpecies,
+      action: action,
+      label: label,
+      role: .outgoingTarget,
+      ephemeral: visitor?.code != code)
+    // Your pet also performs the gesture toward the visitor.
+    performHostSideVisit(action: action)
+  }
+
+  /// Friend's pet jumps onto your screen, does a species gesture, then leaves.
+  private func receiveFriendVisit(
+    action: String, fromName: String, code: String?, species: Species
+  ) {
+    let bond =
+      (code.flatMap { c in Online.shared.friends.first(where: { $0.code == c }) })
+      ?? Online.shared.friends.first(where: { $0.partnerName == fromName })
+    let visitCode = bond?.code ?? code ?? "visit"
+    let visitName = bond?.partnerName.isEmpty == false ? bond!.partnerName : fromName
+    let visitSpecies = bond?.petSpecies ?? species
+    let label = Self.visitLabel(
+      actor: visitName, action: action, toward: "you", incoming: true)
+    presentVisit(
+      code: visitCode,
+      name: visitName,
+      species: visitSpecies,
+      action: action,
+      label: label,
+      role: .incomingActor,
+      ephemeral: true)
+    // Stats / your pet's reaction — play waits for the visit beat via onPlayWithHost.
+    if action != "play" {
+      playRemote(action)
     } else {
-      let line: String =
-        switch action {
-        case "feed": "fed \(name)! 🦴"
-        case "play": "playing with \(name)! 🎾"
-        case "pet": "pet \(name)! ❤️"
-        case "nap": "tucked \(name) in 💤"
-        case "poke": "poked \(name)! 💢"
-        default: "→ \(name)"
-        }
-      say(line, seconds: 2)
+      // Soften: still bump happiness; animation kicks off when visitor starts playing.
+      happiness = min(100, happiness + 12)
+    }
+  }
+
+  private func presentVisit(
+    code: String,
+    name: String,
+    species: Species,
+    action: String,
+    label: String,
+    role: FriendVisitor.VisitRole,
+    ephemeral: Bool
+  ) {
+    let reuse = visitor?.code == code ? visitor : nil
+    if reuse == nil {
+      visitor?.dismiss()
+      let v = FriendVisitor(
+        code: code, name: name, species: species, near: x,
+        ephemeral: ephemeral, quiet: true)
+      v.hostX = { [weak self] in self?.x ?? 0 }
+      v.hostY = { [weak self] in self?.y ?? 0 }
+      visitor = v
+    } else {
+      reuse?.update(name: name, species: species)
+    }
+    guard let v = visitor else { return }
+    v.hostX = { [weak self] in self?.x ?? 0 }
+    v.hostY = { [weak self] in self?.y ?? 0 }
+    v.onPlayWithHost = { [weak self] in
+      guard let self else { return }
+      if role == .incomingActor {
+        self.startSignatureMove(seconds: 5)
+      } else {
+        self.startSignatureMove(seconds: 5)
+      }
+    }
+    let wasEphemeral = ephemeral && reuse == nil
+    v.beginVisit(action: action, label: label, role: role) { [weak self] in
+      guard let self else { return }
+      if wasEphemeral, self.visitor?.code == code {
+        self.visitor?.dismiss()
+        self.visitor = nil
+      }
+    }
+    say(label, seconds: 2.8)
+  }
+
+  private func performHostSideVisit(action: String) {
+    switch action {
+    case "pet":
+      // Your pet delivers the pats (species flavor).
+      happyTicks = Int(2.5 * fps)
+      switch species {
+      case .dog:
+        emit("❤️", count: 4)
+        hop()
+      case .bird:
+        emit("✨", count: 3)
+        set(.fly, seconds: 2.5)
+      case .octopus:
+        emit("🫧", count: 3)
+        set(.glide, seconds: 2.5)
+      }
+    case "poke":
+      // You're poking *them* — a playful jab, not getting mad yourself.
+      emit("💢", count: 2)
+      hop()
+    case "feed":
+      set(.eat, seconds: 2.5)
+      emit(species == .bird ? "seed" : (species == .octopus ? "🦀" : "🍖"))
+    case "play":
+      break // kicked off together via visitor onPlayWithHost
+    case "nap":
+      // You're tucking *them* in — don't nap yourself.
+      emit("💤", count: 2)
+    default:
+      break
+    }
+  }
+
+  private static func visitLabel(
+    actor: String, action: String, toward: String, incoming: Bool
+  ) -> String {
+    let a = actor.isEmpty ? "friend" : actor
+    if incoming {
+      return switch action {
+      case "feed": "\(a) feeds you 🍖"
+      case "play": "\(a) wants to play 🎾"
+      case "pet": "\(a) pats you ❤️"
+      case "nap": "\(a) tucks you in 💤"
+      case "poke": "\(a) pokes you 💢"
+      default: "\(a) → \(action)"
+      }
+    }
+    return switch action {
+    case "feed": "you feed \(toward) 🍖"
+    case "play": "you play with \(toward) 🎾"
+    case "pet": "you pat \(toward) ❤️"
+    case "nap": "you tuck \(toward) in 💤"
+    case "poke": "you poke \(toward) 💢"
+    default: "→ \(toward)"
     }
   }
 

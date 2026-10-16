@@ -1,6 +1,6 @@
 {
-  "version": "0.5.14",
+  "version": "0.5.15",
   "url": "/CoPet.zip",
-  "notes": "Visits spawn glued beside your pad; host stays put.",
-  "publishedAt": "2026-10-16T03:17:36Z"
+  "notes": "Visits glued + max 5s; online announce once per stretch.",
+  "publishedAt": "2026-10-16T03:20:03Z"
 }

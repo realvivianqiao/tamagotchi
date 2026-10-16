@@ -52,6 +52,10 @@ import AppKit
   private var visitor: FriendVisitor?
   /// While a visit is playing, freeze wander so you stay face-to-face.
   private var hostingVisit = false
+  /// Friend codes we've already announced as online this stretch (no spam).
+  private var announcedOnline: Set<String> = []
+  /// When a friend last looked offline — clear announce after a real disconnect.
+  private var offlineSince: [String: Date] = [:]
 
   private var grabStart = CGPoint.zero, lastMouse = CGPoint.zero, grabOffset = CGPoint.zero
   private var swallowRelease = false // double-click nap/wake — don't also pet()
@@ -159,14 +163,7 @@ import AppKit
     Online.shared.onPresence = { [weak self] in
       guard let self else { return }
       self.refreshStatusItem()
-      // Dog on screen is always yours — never rename to the friend.
-      let online = Online.shared.partnerOnline
-      if online && !self.partnerWasOnline, let partner = Online.shared.partner, !self.hidden {
-        self.say("\(partner) is online! 🟢", seconds: 2.5)
-      } else if !online && self.partnerWasOnline, let partner = Online.shared.partner, !self.hidden {
-        self.say("\(partner) went offline 💤", seconds: 2)
-      }
-      self.partnerWasOnline = online
+      self.handlePresenceAnnouncements()
     }
     // Friend sent an action at *you* — their pet visits your screen, then your pet reacts.
     Online.shared.onSync = { [weak self] _, _, action, from, code, fromSpecies in
@@ -196,6 +193,30 @@ import AppKit
     }
     let onlineCount = Online.shared.friends.filter { $0.online && !$0.waiting }.count
     statusItem.button?.title = onlineCount > 0 ? "\(species.emoji)🟢" : species.emoji
+  }
+
+  /// Only announce when someone *just* comes online. No minute-by-minute spam.
+  private func handlePresenceAnnouncements() {
+    let now = Date()
+    for f in Online.shared.friends where !f.waiting {
+      if f.online {
+        offlineSince[f.code] = nil
+        // First time we see them online this stretch → one bubble, then silence.
+        if !announcedOnline.contains(f.code), !hidden {
+          announcedOnline.insert(f.code)
+          say("\(f.partnerName) is online! 🟢", seconds: 2.2)
+        }
+      } else if announcedOnline.contains(f.code) {
+        // Must stay offline a bit before we allow another “just online” later.
+        let started = offlineSince[f.code] ?? now
+        offlineSince[f.code] = started
+        if now.timeIntervalSince(started) >= 60 {
+          announcedOnline.remove(f.code)
+          offlineSince[f.code] = nil
+        }
+      }
+    }
+    partnerWasOnline = Online.shared.partnerOnline
   }
 
   private func playRemote(_ action: String) {
@@ -1124,7 +1145,17 @@ import AppKit
         self.visitor = nil
       }
     }
-    say(label, seconds: 1.0)
+    // Belt-and-suspenders: force-dismiss if anything stalls past 5s.
+    let visitCode = code
+    DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+      guard let self, self.visitor?.code == visitCode else { return }
+      self.hostingVisit = false
+      self.visitor?.dismiss()
+      self.visitor = nil
+      self.bubble = nil
+      self.bubbleTicks = 0
+    }
+    say(label, seconds: 0.9)
   }
 
   private func performHostSideVisit(action: String) {

@@ -48,6 +48,9 @@ import AppKit
   private var playKickoffSent = false
   /// Which side of the host we stand on for this visit (locked so we don't flip-flop).
   private var visitSide: CGFloat = 1
+  /// Absolute deadline — visit never lingers past this.
+  private var visitDeadline: Date?
+  private let visitMaxSeconds: TimeInterval = 4.5
 
   var hostX: (() -> CGFloat)?
   var hostY: (() -> CGFloat)?
@@ -55,9 +58,8 @@ import AppKit
   var onPlayWithHost: (() -> Void)?
   /// Fired when the visitor is close and the gesture starts (host should react *now*).
   var onGestureStart: (() -> Void)?
-  private let minGap: CGFloat = 260
-  /// Centers ~half a sprite apart — reads as standing together, not across the desk.
-  private let visitGap: CGFloat = 56
+  /// Centers almost overlapping — hip-to-hip, not across the desk.
+  private let visitGap: CGFloat = 48
 
   init(
     code: String, name: String, species: Species, near hostX: CGFloat,
@@ -67,14 +69,15 @@ import AppKit
     self.name = name
     self.species = species
     self.ephemeral = ephemeral
+    // Interaction visitors start "visiting" immediately so idle gap-push never runs.
+    self.isVisiting = ephemeral
     let screen = NSScreen.main!.visibleFrame
-    // Always immediately beside the host (prefer the roomier side).
     let roomRight = screen.maxX - hostX
     let roomLeft = hostX - screen.minX
     visitSide = roomRight >= roomLeft ? 1 : -1
-    x = min(max(hostX + visitSide * visitGap, screen.minX + 60), screen.maxX - 60)
+    x = min(max(hostX + visitSide * visitGap, screen.minX + 50), screen.maxX - 50)
     y = screen.minY
-    dir = -visitSide // face the host
+    dir = -visitSide
     sprite = Dog.sprite(Look(species: species, pose: .sit))
     window = NSPanel(
       contentRect: CGRect(origin: .zero, size: windowSize), styleMask: [.borderless, .nonactivatingPanel],
@@ -88,11 +91,22 @@ import AppKit
     window.contentView = view
     view.visitor = self
     window.orderFrontRegardless()
-    if !quiet {
-      say("hi from \(name) \(species.emoji)", seconds: 2.5)
+    // Don't start the timer until beginVisit — avoids a frame of idle shove.
+    if !ephemeral {
+      if !quiet {
+        say("hi from \(name) \(species.emoji)", seconds: 2.5)
+      }
+      startTimer()
     }
+  }
+
+  private func startTimer() {
+    guard timer == nil else { return }
     timer = Timer.scheduledTimer(withTimeInterval: 1 / fps, repeats: true) { [weak self] _ in
       Task { @MainActor in self?.step() }
+    }
+    if let timer {
+      RunLoop.main.add(timer, forMode: .common)
     }
   }
 
@@ -117,7 +131,7 @@ import AppKit
     window.close()
   }
 
-  /// ~5s visit: appear beside host → gesture → quick exit. No cross-screen walk.
+  /// ≤4.5s visit: appear beside host → gesture → leave. Never idles on screen.
   func beginVisit(
     action: String,
     label: String,
@@ -134,8 +148,11 @@ import AppKit
     onVisitDone = onDone
     untilWoken = false
     showNameplate = true
-    say(label, seconds: 1.0)
+    visitDeadline = Date().addingTimeInterval(visitMaxSeconds)
+    say(label, seconds: 0.9)
+    startTimer()
     snapBesideHost()
+    render()
     let hx = hostX?() ?? x
     let hy = hostY?() ?? y
     startVisitGesture(hostX: hx, hostY: hy)
@@ -268,6 +285,11 @@ import AppKit
   }
 
   private func stepVisit() {
+    // Hard cap — never linger past ~4.5s even if a phase stalls.
+    if let deadline = visitDeadline, Date() >= deadline {
+      finishVisit()
+      return
+    }
     visitTicks += 1
     let hx = hostX?() ?? x
     let hy = hostY?() ?? y
@@ -276,7 +298,7 @@ import AppKit
     case 1: // gesture — glued beside host the whole time
       snapBesideHost()
       runVisitGestureTick(hostX: hx, hostY: hy)
-      if visitTicks == Int(0.9 * fps) {
+      if visitTicks == Int(0.8 * fps) {
         bubble = nil
         bubbleTicks = 0
       }
@@ -287,28 +309,28 @@ import AppKit
         bubbleTicks = 0
         dir = visitSide
         switch species {
-        case .dog: set(.run, seconds: 0.8)
-        case .bird: set(.fly, seconds: 0.8)
-        case .octopus: set(.glide, seconds: 0.8)
+        case .dog: set(.run, seconds: 0.5)
+        case .bird: set(.fly, seconds: 0.5)
+        case .octopus: set(.glide, seconds: 0.5)
         }
       }
 
-    default: // tiny step away, then gone (~0.7s)
-      x += visitSide * 6
-      if species == .bird { y += 1.4 }
-      if visitTicks > Int(0.7 * fps) {
+    default: // tiny step away, then gone (~0.45s)
+      x += visitSide * 8
+      if species == .bird { y += 1.6 }
+      if visitTicks > Int(0.45 * fps) {
         finishVisit()
         return
       }
     }
   }
 
-  /// Gesture window — keep total visit ≈ 5s with approach + exit.
+  /// Gesture only — total visit stays under visitMaxSeconds with leave.
   private var visitGestureDuration: Int {
     switch visitAction {
-    case "play": return Int(2.8 * fps)
-    case "nap": return Int(2.2 * fps)
-    default: return Int(2.5 * fps)
+    case "play": return Int(2.4 * fps)
+    case "nap": return Int(2.0 * fps)
+    default: return Int(2.2 * fps)
     }
   }
 
@@ -440,6 +462,11 @@ import AppKit
   }
 
   private func stepIdle() {
+    // Ephemeral visitors must never idle-wander on the desk.
+    if ephemeral {
+      finishVisit()
+      return
+    }
     let vf0 = NSScreen.main!.visibleFrame
     switch activity {
     case .walk:
@@ -486,7 +513,9 @@ import AppKit
       }
     }
 
-    if let hx = hostX?(), abs(x - hx) < minGap {
+    // Parked (non-ephemeral) visitors keep a gap from the host.
+    let parkGap: CGFloat = 260
+    if let hx = hostX?(), abs(x - hx) < parkGap {
       dir = x < hx ? -1 : 1
       x += dir * 4
       if activity != .sit && activity != .eat && activity != .sleep {

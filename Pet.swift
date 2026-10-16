@@ -1168,12 +1168,15 @@ import AppKit
 
     if !hidden {
       menu.addItem(info(petName))
-      menu.addItem(item("Poke", #selector(pokeSelf)))
-      menu.addItem(item("Feed", #selector(feed)))
-      menu.addItem(item("Play", #selector(play)))
-      menu.addItem(item("Pet", #selector(petFromMenu)))
-      menu.addItem(item(isAsleep ? "Wake up" : "Nap", #selector(toggleNap)))
-      let speciesItem = NSMenuItem(title: "Choose pet…", action: nil, keyEquivalent: "")
+      menu.addItem(item("Poke", #selector(pokeSelf), symbol: "hand.point.left.fill"))
+      menu.addItem(item("Feed", #selector(feed), symbol: "fork.knife"))
+      menu.addItem(item("Play", #selector(play), symbol: "tennisball.fill"))
+      menu.addItem(item("Pet", #selector(petFromMenu), symbol: "heart.fill"))
+      menu.addItem(item(
+        isAsleep ? "Wake up" : "Nap",
+        #selector(toggleNap),
+        symbol: isAsleep ? "sun.max.fill" : "moon.zzz.fill"))
+      let speciesItem = item("Choose pet…", nil, symbol: "pawprint.fill")
       let speciesMenu = NSMenu()
       for sp in Species.allCases {
         let row = NSMenuItem(
@@ -1182,6 +1185,7 @@ import AppKit
           keyEquivalent: "")
         row.target = self
         row.representedObject = sp.rawValue
+        row.image = menuSymbol(sp == .dog ? "dog.fill" : sp == .bird ? "bird.fill" : "drop.fill")
         if sp == species { row.state = .on }
         speciesMenu.addItem(row)
       }
@@ -1199,9 +1203,9 @@ import AppKit
       sub.addItem(info("No friends yet — Invite or Claim"))
     } else {
       for f in friends {
-        let mark = f.waiting ? "waiting" : (f.online ? "online" : "away")
+        let mark = f.waiting ? "⏳" : (f.online ? "🟢" : "⚪️")
         let label = f.waiting ? "code \(f.code)" : shortFriendName(f.partnerName)
-        let row = NSMenuItem(title: "\(label)  ·  \(mark)", action: nil, keyEquivalent: "")
+        let row = NSMenuItem(title: "\(mark)  \(label)", action: nil, keyEquivalent: "")
         if f.code == Online.shared.activeCode { row.state = .on }
         let person = NSMenu()
 
@@ -1209,14 +1213,14 @@ import AppKit
           person.addItem(info("Waiting for them to join"))
           person.addItem(info("Code \(f.code)"))
         } else {
-          person.addItem(info("\(f.petSpecies.defaultName)  ·  full \(Int(f.fullness))%  ·  happy \(Int(f.happiness))%"))
+          person.addItem(info("\(f.petSpecies.emoji)  \(f.petSpecies.defaultName)  ·  full \(Int(f.fullness))%  ·  happy \(Int(f.happiness))%"))
           if let act = friendlyActivity(f.lastActivity) {
             person.addItem(info(act))
           }
           person.addItem(.separator())
 
           let focus = NSMenuItem(
-            title: "Select",
+            title: "✓  Select",
             action: #selector(selectFriend(_:)),
             keyEquivalent: "")
           focus.target = self
@@ -1226,22 +1230,21 @@ import AppKit
 
           let onScreen = visitor?.code == f.code
           let bring = NSMenuItem(
-            title: onScreen ? "Hide from screen" : "Show on screen",
+            title: onScreen ? "👁  Hide from screen" : "👁  Show on screen",
             action: onScreen ? #selector(hideFriendOnScreen(_:)) : #selector(showFriendOnScreen(_:)),
             keyEquivalent: "")
           bring.target = self
           bring.representedObject = f.code
           person.addItem(bring)
 
-          for (title, sel) in [
-            ("Feed", #selector(friendFeed(_:))),
-            ("Play", #selector(friendPlay(_:))),
-            ("Pet", #selector(friendPet(_:))),
-            ("Poke", #selector(friendPoke(_:))),
-            ("Tuck in", #selector(friendNap(_:))),
-          ] as [(String, Selector)] {
-            let m = NSMenuItem(title: title, action: sel, keyEquivalent: "")
-            m.target = self
+          for (title, sel, sym) in [
+            ("Feed", #selector(friendFeed(_:)), "fork.knife"),
+            ("Play", #selector(friendPlay(_:)), "tennisball.fill"),
+            ("Pet", #selector(friendPet(_:)), "heart.fill"),
+            ("Poke", #selector(friendPoke(_:)), "hand.point.left.fill"),
+            ("Tuck in", #selector(friendNap(_:)), "moon.zzz.fill"),
+          ] as [(String, Selector, String)] {
+            let m = item(title, sel, symbol: sym)
             m.representedObject = f.code
             person.addItem(m)
           }
@@ -1263,25 +1266,32 @@ import AppKit
     friendsItem.submenu = sub
     menu.addItem(friendsItem)
 
-    menu.addItem(item("Invite friend…", #selector(onlineInvite)))
-    menu.addItem(item("Claim invite…", #selector(onlineClaim)))
+    menu.addItem(item("Invite friend…", #selector(onlineInvite), symbol: "envelope.fill"))
+    menu.addItem(item("Claim invite…", #selector(onlineClaim), symbol: "key.fill"))
     if !friends.isEmpty {
-      menu.addItem(item("Leave all bonds", #selector(onlineLeave)))
+      menu.addItem(item("Leave all bonds", #selector(onlineLeave), symbol: "rectangle.portrait.and.arrow.right"))
     }
-    menu.addItem(item("My name…", #selector(onlineSetName)))
-    menu.addItem(item("Check for updates…", #selector(checkForUpdates)))
+    menu.addItem(item("My name…", #selector(onlineSetName), symbol: "pencil"))
+    menu.addItem(item("Check for updates…", #selector(checkForUpdates), symbol: "arrow.triangle.2.circlepath"))
     menu.addItem(.separator())
-    menu.addItem(item("Quit", #selector(quit)))
+    menu.addItem(item("Quit", #selector(quit), symbol: "xmark.circle"))
   }
 
   @objc private func checkForUpdates() {
     Updater.shared.checkNow()
   }
 
-  private func item(_ title: String, _ action: Selector) -> NSMenuItem {
+  private func item(_ title: String, _ action: Selector?, symbol: String? = nil) -> NSMenuItem {
     let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-    item.target = self
+    item.target = action == nil ? nil : self
+    if let symbol { item.image = menuSymbol(symbol) }
     return item
+  }
+
+  private func menuSymbol(_ name: String) -> NSImage? {
+    let img = NSImage(systemSymbolName: name, accessibilityDescription: nil)
+    img?.isTemplate = true
+    return img
   }
 
   private func info(_ title: String) -> NSMenuItem {

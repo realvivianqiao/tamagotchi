@@ -1,6 +1,6 @@
 {
-  "version": "0.4.3",
+  "version": "0.4.4",
   "url": "/CoPet.zip",
-  "notes": "Fix: always greet on launch; don\u2019t wait on weather.",
-  "publishedAt": "2026-10-16T02:02:59Z"
+  "notes": "Menu actions show SF Symbol icons.",
+  "publishedAt": "2026-10-16T02:05:58Z"
 }

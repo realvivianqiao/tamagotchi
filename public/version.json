@@ -1,6 +1,6 @@
 {
-  "version": "0.4.2",
+  "version": "0.4.3",
   "url": "/CoPet.zip",
-  "notes": "Default names: Zuzu (dog), Bloop (octopus), Puff (bird).",
-  "publishedAt": "2026-10-16T01:49:47Z"
+  "notes": "Fix: always greet on launch; don\u2019t wait on weather.",
+  "publishedAt": "2026-10-16T02:02:59Z"
 }

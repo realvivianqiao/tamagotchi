@@ -102,14 +102,17 @@ import AppKit
 
   /// Good morning / weather when the Mac wakes, the daypart changes, or the pad launches.
   private func wireAmbientGreetings() {
-    // Launch greeting (skip if they left the pet napping).
+    // Always say hi on launch (force) — reload should talk even if we already
+    // greeted this evening. Skip only if they left the pet napping.
     Task { @MainActor in
-      try? await Task.sleep(nanoseconds: 2_500_000_000)
-      Ambient.shared.maybeGreet(species: species, asleep: isAsleep) { [weak self] text, secs in
+      try? await Task.sleep(nanoseconds: 1_200_000_000)
+      guard !self.hidden else { return }
+      Ambient.shared.maybeGreet(species: self.species, asleep: self.isAsleep, force: true) {
+        [weak self] text, secs in
         self?.say(text, seconds: secs)
       }
     }
-    // Opening the laptop lid / waking from sleep → morning hello.
+    // Opening the laptop lid / waking from sleep → hello again.
     NSWorkspace.shared.notificationCenter.addObserver(
       forName: NSWorkspace.didWakeNotification,
       object: nil,
@@ -117,7 +120,7 @@ import AppKit
     ) { [weak self] _ in
       Task { @MainActor in
         guard let self, !self.hidden else { return }
-        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
         Ambient.shared.maybeGreet(species: self.species, asleep: self.isAsleep, force: true) {
           [weak self] text, secs in
           self?.say(text, seconds: secs)

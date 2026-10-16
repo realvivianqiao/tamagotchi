@@ -37,7 +37,8 @@ enum Daypart: String {
     lastGreetedPart = UserDefaults.standard.string(forKey: "mochiLastGreetPart")
   }
 
-  /// Call on launch, Mac wake, and after nap — may speak once per daypart.
+  /// Call on launch, Mac wake, and after nap.
+  /// - `force`: speak even if we already greeted this daypart (use on launch / Mac wake).
   func maybeGreet(
     species: Species,
     asleep: Bool,
@@ -51,10 +52,14 @@ enum Daypart: String {
     lastGreetedPart = key
     UserDefaults.standard.set(key, forKey: "mochiLastGreetPart")
 
+    // Speak immediately — don't wait on weather (wttr can be slow / fail).
+    let first = Self.composeGreeting(species: species, part: part, weather: weatherBlurb)
+    say(first, part == .morning ? 4.0 : 3.5)
+
     Task { @MainActor in
       await refreshWeatherIfNeeded()
-      let line = Self.composeGreeting(species: species, part: part, weather: weatherBlurb)
-      say(line, part == .morning ? 4.0 : 3.5)
+      let richer = Self.composeGreeting(species: species, part: part, weather: weatherBlurb)
+      if richer != first { say(richer, 3.8) }
     }
   }
 
@@ -67,7 +72,7 @@ enum Daypart: String {
     if let last = lastWeatherFetch, Date().timeIntervalSince(last) < 45 * 60, weatherBlurb != nil {
       return
     }
-    guard !greetInFlight else { return }
+    if greetInFlight { return }
     greetInFlight = true
     defer { greetInFlight = false }
     do {

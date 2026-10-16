@@ -1,6 +1,6 @@
 {
-  "version": "0.5.12",
+  "version": "0.5.13",
   "url": "/CoPet.zip",
-  "notes": "Keep bond rooms attached; explain online = both pads in the room.",
-  "publishedAt": "2026-10-16T03:10:19Z"
+  "notes": "Clear Remove bond button on each friend.",
+  "publishedAt": "2026-10-16T03:11:23Z"
 }

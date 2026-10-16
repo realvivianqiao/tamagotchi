@@ -1301,10 +1301,22 @@ import AppKit
 
   @objc private func removeFriend(_ sender: NSMenuItem) {
     guard let code = sender.representedObject as? String else { return }
-    let name = Online.shared.friends.first(where: { $0.code == code })?.partnerName
+    let name = Online.shared.friends.first(where: { $0.code == code })?.partnerName ?? "friend"
+    let alert = NSAlert()
+    alert.messageText = "Remove bond?"
+    alert.informativeText = "Unbind from \(name)? You can accept their code again later."
+    alert.addButton(withTitle: "Remove bond")
+    alert.addButton(withTitle: "Cancel")
+    NSApp.activate(ignoringOtherApps: true)
+    guard alert.runModal() == .alertFirstButtonReturn else { return }
     logApp("remove_friend", code: code, targetName: name)
     Online.shared.removeFriend(code: code)
+    if visitor?.code == code {
+      visitor?.dismiss()
+      visitor = nil
+    }
     refreshStatusItem()
+    say("unbound from \(name)", seconds: 2)
   }
 
   @objc private func onlineSetName() {
@@ -1448,7 +1460,7 @@ import AppKit
 
         person.addItem(.separator())
         let rm = NSMenuItem(
-          title: "Remove",
+          title: "Remove bond",
           action: #selector(removeFriend(_:)),
           keyEquivalent: "")
         rm.target = self

@@ -1,6 +1,6 @@
 {
-  "version": "0.5.24",
+  "version": "0.5.25",
   "url": "/CoPet.zip",
-  "notes": "Better kick-locked beat grid so dance follows the da-da-da, not snares.",
-  "publishedAt": "2026-10-16T03:58:41Z"
+  "notes": "Freeze dance hops while the menu is open so it doesn\u2019t bounce.",
+  "publishedAt": "2026-10-16T04:00:17Z"
 }

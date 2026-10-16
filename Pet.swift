@@ -67,6 +67,8 @@ import AppKit
   private var lastBeatStrength: Double = 0.6
   /// When true, beat squash stretches tall instead of flat (PetView).
   private(set) var danceStretch = false
+  /// Status / context menu open — freeze dance so the menu doesn’t bounce with hops.
+  private var menuIsOpen = false
 
   private var grabStart = CGPoint.zero, lastMouse = CGPoint.zero, grabOffset = CGPoint.zero
   private var swallowRelease = false // double-click nap/wake — don't also pet()
@@ -1509,6 +1511,25 @@ import AppKit
     a.runModal()
   }
 
+  func menuWillOpen(_ menu: NSMenu) {
+    menuIsOpen = true
+    // Settle mid-hop so the panel doesn’t ride the bounce.
+    if activity == .fall {
+      vx = 0
+      vy = 0
+      y = restFloor(in: screenFrame())
+      activity = .sit
+      activityTicks = Int(2 * fps)
+      squashTicks = 0
+      danceStretch = false
+      render()
+    }
+  }
+
+  func menuDidClose(_ menu: NSMenu) {
+    menuIsOpen = false
+  }
+
   func menuNeedsUpdate(_ menu: NSMenu) {
     menu.removeAllItems()
     menu.addItem(info("Fullness   \(bar(fullness))"))
@@ -1690,7 +1711,7 @@ import AppKit
   /// Most beats = quick squash (reads on tempo). Bigger hops only on accents
   /// so the pet can land before the next kick — otherwise it looks off-beat.
   private func pulseToBeat() {
-    guard SpotifyDance.shared.enabled, !hidden, !grabbing else { return }
+    guard SpotifyDance.shared.enabled, !hidden, !grabbing, !menuIsOpen else { return }
     guard !untilWoken, activity != .sleep else { return }
     guard dancingToSpotify || isDanceMode else { return }
     let now = ProcessInfo.processInfo.systemUptime

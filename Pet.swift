@@ -63,6 +63,9 @@ import AppKit
   /// Spotify is playing and Dance to Spotify is on — pulse on beat, chill wander.
   private var dancingToSpotify = false
   private var lastBeatPulse: TimeInterval = 0
+  private var danceStep = 0
+  /// When true, beat squash stretches tall instead of flat (PetView).
+  private(set) var danceStretch = false
 
   private var grabStart = CGPoint.zero, lastMouse = CGPoint.zero, grabOffset = CGPoint.zero
   private var swallowRelease = false // double-click nap/wake — don't also pet()
@@ -536,7 +539,11 @@ import AppKit
     activityTicks -= 1
     guard activityTicks <= 0, activity != .held, activity != .fall else { return }
     // Don't pick a new wander while a friend is visiting or vibing to Spotify.
-    if hostingVisit || visitor?.isVisiting == true || dancingToSpotify {
+    if hostingVisit || visitor?.isVisiting == true || isDanceMode {
+      // Stay awake and ready for the next beat — never auto-nap mid-vibe.
+      if activity == .sleep || untilWoken {
+        untilWoken = false
+      }
       set(.sit, seconds: 1)
       return
     }
@@ -549,7 +556,20 @@ import AppKit
     }
   }
 
+  /// Dance menu on + (hearing music or a recent beat). Blocks idle nap.
+  private var isDanceMode: Bool {
+    guard SpotifyDance.shared.enabled else { return false }
+    if dancingToSpotify { return true }
+    return lastBeatPulse > 0
+      && ProcessInfo.processInfo.systemUptime - lastBeatPulse < 5
+  }
+
   private func chooseNext() {
+    // Dance to Spotify stays on → never drift into idle sleep between tracks.
+    if SpotifyDance.shared.enabled {
+      set(.sit, seconds: 2)
+      return
+    }
     let hour = Calendar.current.component(.hour, from: Date())
     let sleepy = hour >= 23 || hour < 7 || fullness < 15
     let options: [(Activity, Int)] = speciesIdleOptions(sleepy: sleepy)
@@ -714,15 +734,17 @@ import AppKit
 
   private var look: Look {
     let angry = angryTicks > 0
-    let happy = !angry && (happyTicks > 0 || activity == .eat || activity == .run || activity == .fly)
+    let dancing = isDanceMode
+    let happy = !angry && (happyTicks > 0 || dancing || activity == .eat || activity == .run || activity == .fly)
     var l = Look(species: species)
     switch activity {
     case .walk, .run, .fly: l.pose = .walk(walkFrame)
-    case .glide, .sit, .eat: l.pose = .sit
+    case .glide, .sit, .eat: l.pose = dancing && walkFrame == 1 ? .walk(1) : .sit
     case .sleep: l.pose = .lie
-    case .held, .fall: l.pose = .hang
+    case .held, .fall: l.pose = dancing ? .walk(walkFrame) : .hang
     }
-    if activity == .sleep || (blinkTicks > 0 && !angry) {
+    // Don't blink-closed while dancing — reads as napping.
+    if activity == .sleep || (blinkTicks > 0 && !angry && !dancing) {
       l.eyes = .closed
     } else if angry {
       l.eyes = .angry
@@ -732,7 +754,7 @@ import AppKit
       l.eyes = .open
     }
     l.tongue = !angry && (activity == .eat ? walkFrame == 0 : happy)
-    l.wag = activity == .sleep || angry ? 0 : tick / (happy || activity == .fly || activity == .glide ? 4 : 12) % 2
+    l.wag = activity == .sleep || angry ? 0 : tick / (happy || dancing || activity == .fly || activity == .glide ? 3 : 12) % 2
     return l
   }
 
@@ -1624,6 +1646,13 @@ import AppKit
     dance.onPlayingChange = { [weak self] playing in
       guard let self else { return }
       self.dancingToSpotify = playing && dance.enabled
+      if playing, dance.enabled {
+        self.untilWoken = false
+        if self.activity == .sleep {
+          self.set(.sit, seconds: 1)
+          self.say("🎵", seconds: 1.2)
+        }
+      }
     }
     dance.onError = { [weak self] message in
       // Short tip — full Settings path is in the alert if they re-toggle.
@@ -1638,20 +1667,60 @@ import AppKit
     if dance.enabled { dance.start() }
   }
 
-  /// Squash + tiny hop on each local beat while Dance to Spotify is active.
+  /// Varied hop / squash / notes on each local beat while Dance to Spotify is active.
   private func pulseToBeat() {
-    guard dancingToSpotify, !hidden, !untilWoken, !grabbing else { return }
+    guard SpotifyDance.shared.enabled, (dancingToSpotify || isDanceMode), !hidden, !grabbing
+    else { return }
+    // Music wins over idle nap.
+    if untilWoken || activity == .sleep {
+      untilWoken = false
+      particles.removeAll { $0.text == "💤" || $0.text == "🫧" }
+      set(.sit, seconds: 1)
+    }
     let now = ProcessInfo.processInfo.systemUptime
-    guard now - lastBeatPulse > 0.22 else { return }
+    guard now - lastBeatPulse > 0.20 else { return }
     lastBeatPulse = now
-    squashTicks = max(squashTicks, 7)
-    happyTicks = max(happyTicks, Int(0.4 * fps))
+    dancingToSpotify = true
+    happyTicks = max(happyTicks, Int(0.55 * fps))
     walkFrame ^= 1
-    let floor = restFloor(in: screenFrame())
-    if activity != .held, activity != .fly, activity != .glide,
-       y <= floor + 3
-    {
-      startFall(vx: vx * 0.2, vy: 4.2)
+    danceStep = (danceStep + 1) % 6
+
+    let notes = ["🎵", "🎶", "♪", "♫", "✨"]
+    emit(notes.randomElement()!, count: Int.random(in: 1...2))
+
+    let floorY = restFloor(in: screenFrame())
+    let grounded = activity != .held && y <= floorY + 4
+    danceStretch = false
+
+    switch danceStep {
+    case 0: // bounce
+      squashTicks = max(squashTicks, 8)
+      if grounded { startFall(vx: 0, vy: CGFloat.random(in: 5.5...7.5)) }
+    case 1: // side hop
+      squashTicks = max(squashTicks, 6)
+      if grounded {
+        startFall(vx: dir * CGFloat.random(in: 1.8...3.2), vy: CGFloat.random(in: 4.5...6.5))
+      }
+    case 2: // groove squash (no hop)
+      squashTicks = max(squashTicks, 11)
+    case 3: // stretch up then hop
+      danceStretch = true
+      squashTicks = max(squashTicks, 9)
+      if grounded { startFall(vx: 0, vy: CGFloat.random(in: 7...10)) }
+      emit("🎶")
+    case 4: // flip + hop
+      dir = -dir
+      squashTicks = max(squashTicks, 7)
+      if grounded { startFall(vx: dir * 2.2, vy: 6) }
+    default: // shimmy
+      squashTicks = max(squashTicks, 10)
+      if grounded {
+        startFall(vx: CGFloat.random(in: -2.5...2.5), vy: CGFloat.random(in: 3.5...5.5))
+      }
+    }
+
+    if Int.random(in: 0..<10) == 0 {
+      say(["🎵", "🎶", "♪~", "vibe!", "💃"].randomElement()!, seconds: 1.1, force: false)
     }
     render()
   }

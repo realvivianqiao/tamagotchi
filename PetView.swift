@@ -20,11 +20,18 @@ import AppKit
     let rect = CGRect(origin: spriteOrigin, size: spriteSize)
     ctx.saveGState()
     ctx.interpolationQuality = .none
-    // Landing squash: briefly flatter + wider so bounces read as animation.
+    // Landing / dance squash (or tall stretch on stretch beats).
     if pet.squashTicks > 0 {
       let t = CGFloat(pet.squashTicks) / 8
-      let sy = 1 - 0.22 * t
-      let sx = 1 + 0.18 * t
+      let sy: CGFloat
+      let sx: CGFloat
+      if pet.danceStretch {
+        sy = 1 + 0.28 * t
+        sx = 1 - 0.14 * t
+      } else {
+        sy = 1 - 0.22 * t
+        sx = 1 + 0.18 * t
+      }
       ctx.translateBy(x: rect.midX, y: rect.minY)
       ctx.scaleBy(x: sx, y: sy)
       ctx.translateBy(x: -rect.midX, y: -rect.minY)

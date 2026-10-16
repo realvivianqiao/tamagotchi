@@ -6,16 +6,16 @@
     <description>CoPet updates</description>
     <language>en</language>
     <item>
-      <title>CoPet 0.5.21</title>
-      <pubDate>2026-10-16T03:45:02Z</pubDate>
-      <sparkle:version>32</sparkle:version>
-      <sparkle:shortVersionString>0.5.21</sparkle:shortVersionString>
+      <title>CoPet 0.5.22</title>
+      <pubDate>2026-10-16T03:48:51Z</pubDate>
+      <sparkle:version>33</sparkle:version>
+      <sparkle:shortVersionString>0.5.22</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-      <description><![CDATA[Remove the Select row from friend menus.]]></description>
+      <description><![CDATA[Livelier Spotify dance with music notes; no auto-nap while Dance to Spotify is on.]]></description>
       <enclosure
         url="https://tamagotchi-udtz.onrender.com/CoPet.zip"
-        sparkle:edSignature="z9p2gs1rZOFUOpBYx/Td89zChf6VXyjl76cKRZkUATImAxgBBDN/vHLUjCnNaEci+iBhTY6feR/CxioHQGH6Aw=="
-        length="1774847"
+        sparkle:edSignature="gIO80BeiEXK6CNpJRmfeGE0D3fB21C7EbiC0WvlOl5ivzjgnfm20THdBbuiPxVmcZ8JRjfNahuB8DOg3IztjAA=="
+        length="1778139"
         type="application/octet-stream" />
     </item>
   </channel>

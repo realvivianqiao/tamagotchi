@@ -6,16 +6,16 @@
     <description>CoPet updates</description>
     <language>en</language>
     <item>
-      <title>CoPet 0.4</title>
-      <pubDate>2026-10-16T01:44:56Z</pubDate>
-      <sparkle:version>5</sparkle:version>
-      <sparkle:shortVersionString>0.4</sparkle:shortVersionString>
+      <title>CoPet 0.4.1</title>
+      <pubDate>2026-10-16T01:48:51Z</pubDate>
+      <sparkle:version>6</sparkle:version>
+      <sparkle:shortVersionString>0.4.1</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-      <description><![CDATA[Sparkle auto-updates. Download once more — after this, Check for updates… handles the rest.]]></description>
+      <description><![CDATA[Good morning from system time, plus optional local weather (no API key).]]></description>
       <enclosure
         url="https://tamagotchi-udtz.onrender.com/CoPet.zip"
-        sparkle:edSignature="LbBCVB4kpQbrKBzm3v4pg9npZ7fzogiVAQjIzcoA/Mwr3YQjPjbZX88ngSr5z6MiLn/eT3oYfCpadMAak9eDCg=="
-        length="1605000"
+        sparkle:edSignature="8ldnuEtufJPIRPDlxFwTa8pRivSS0eIYxodRe2K/C+c0fO2FRRXTUvev4zeU4ChWMUDcfM1CuAzNGcb7ox/sAA=="
+        length="1637157"
         type="application/octet-stream" />
     </item>
   </channel>

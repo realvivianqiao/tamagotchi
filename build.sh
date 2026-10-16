@@ -84,20 +84,6 @@ EOF
 # Sparkle appcast (EdDSA-signed). Requires secrets/sparkle_eddsa_private.key
 KEY_FILE=secrets/sparkle_eddsa_private.key
 if [[ -f "$KEY_FILE" ]]; then
-  rm -rf build/sparkle-dist
-  mkdir -p build/sparkle-dist
-  # Filename version helps humans; Sparkle reads CFBundleVersion from the .app inside.
-  cp public/CoPet.zip "build/sparkle-dist/CoPet ${VERSION}.zip"
-  printf '%s\n' "$NOTES" > "build/sparkle-dist/CoPet ${VERSION}.txt"
-  ./vendor/bin/generate_appcast \
-    --ed-key-file "$KEY_FILE" \
-    --download-url-prefix "${FEED_BASE}/" \
-    --embed-release-notes \
-    --disable-signing-warning \
-    -o appcast.xml \
-    build/sparkle-dist
-  # generate_appcast writes enclosure URLs as prefix + filename; also publish a stable CoPet.zip
-  # Rewrite enclosure to the stable /CoPet.zip URL while keeping signature of that same bytes.
   SIG_LINE=$(./vendor/bin/sign_update --ed-key-file "$KEY_FILE" public/CoPet.zip)
   # SIG_LINE looks like: sparkle:edSignature="..." length="..."
   python3 - "$SIG_LINE" "$VERSION" "$BUILD" "$NOTES" "$FEED_BASE" "$PUBLISHED" <<'PY'

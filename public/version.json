@@ -1,6 +1,6 @@
 {
-  "version": "0.5.19",
+  "version": "0.5.20",
   "url": "/CoPet.zip",
-  "notes": "Opt-in Dance to Spotify: tap Spotify desktop audio, find the beat on-device, pulse the pet.",
-  "publishedAt": "2026-10-16T03:37:19Z"
+  "notes": "Fix Dance to Spotify with Bluetooth headphones; start tap reliably and surface permission errors.",
+  "publishedAt": "2026-10-16T03:42:04Z"
 }

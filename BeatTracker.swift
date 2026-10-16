@@ -58,8 +58,8 @@ final class BeatTracker: @unchecked Sendable {
       blockPeak = max(blockPeak, e)
 
       // Rising edge through adaptive threshold → onset candidate.
-      let thresh = max(0.01, localFloor * 4.5)
-      if e > thresh, e > localEnv * 1.35 {
+      let thresh = max(0.004, localFloor * 3.2)
+      if e > thresh, e > localEnv * 1.25 {
         onsetThisBlock = true
       }
     }
@@ -71,7 +71,7 @@ final class BeatTracker: @unchecked Sendable {
     let now = startedAt + Double(samplesSeen) / sr
     var fire = false
 
-    if onsetThisBlock, blockPeak > 0.008 {
+    if onsetThisBlock, blockPeak > 0.003 {
       if lastOnsetTime < 0 || now - lastOnsetTime > 0.22 {
         if lastOnsetTime > 0 {
           let ioi = now - lastOnsetTime

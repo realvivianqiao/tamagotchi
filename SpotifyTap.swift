@@ -5,7 +5,8 @@ import Foundation
 
 /// Captures Spotify desktop audio via Core Audio process taps (macOS 14.2+).
 /// Includes every audio process whose bundle ID starts with `com.spotify.client`
-/// (main app + Chromium helpers).
+/// (main app + Chromium helpers). Works with Bluetooth headphones — we tap Spotify,
+/// not the speaker.
 @available(macOS 14.2, *)
 final class SpotifyTap {
   enum TapError: LocalizedError {
@@ -19,7 +20,8 @@ final class SpotifyTap {
       switch self {
       case .unsupported: return "Dance to Spotify needs macOS 14.2 or later."
       case .noSpotify: return "Spotify isn’t running."
-      case .createTap(let s): return "Couldn’t tap Spotify audio (\(s)). Check Screen & System Audio Recording permission."
+      case .createTap(let s):
+        return "Couldn’t tap Spotify audio (\(s)). Allow CoPet under System Settings → Privacy & Security → Screen & System Audio Recording."
       case .createAggregate(let s): return "Couldn’t open Spotify audio device (\(s))."
       case .start(let s): return "Couldn’t start Spotify audio capture (\(s))."
       }
@@ -33,8 +35,20 @@ final class SpotifyTap {
   private(set) var sampleRate: Double = 48_000
   private(set) var isRunning = false
 
+  /// Last time we received any audio frames (wall clock).
+  private(set) var lastBufferAt: CFAbsoluteTime = 0
+  /// Recent RMS energy (0…~1), updated on the IO queue.
+  private var recentRMS: Double = 0
+  private let rmsLock = NSLock()
+
   /// Called on `ioQueue` with mono float samples.
   var onSamples: ((UnsafePointer<Float>, Int) -> Void)?
+
+  var currentRMS: Double {
+    rmsLock.lock()
+    defer { rmsLock.unlock() }
+    return recentRMS
+  }
 
   func start() throws {
     stop()
@@ -57,28 +71,13 @@ final class SpotifyTap {
     let asbd = try Self.readTapFormat(tapID)
     sampleRate = asbd.mSampleRate > 0 ? asbd.mSampleRate : 48_000
 
-    let aggregateUID = "com.vivianqiao.copet.spotify.\(UUID().uuidString)"
-    let description: [String: Any] = [
-      kAudioAggregateDeviceNameKey: "CoPet Spotify Tap",
-      kAudioAggregateDeviceUIDKey: aggregateUID,
-      kAudioAggregateDeviceIsPrivateKey: true,
-      kAudioAggregateDeviceIsStackedKey: false,
-      kAudioAggregateDeviceTapAutoStartKey: true,
-      // Tap-only aggregate — avoids locking to the default output clock/rate.
-      kAudioAggregateDeviceTapListKey: [[
-        kAudioSubTapUIDKey: desc.uuid.uuidString,
-        kAudioSubTapDriftCompensationKey: true,
-      ]],
-    ]
-
-    var agg = AudioObjectID(kAudioObjectUnknown)
-    let aggStatus = AudioHardwareCreateAggregateDevice(description as CFDictionary, &agg)
-    guard aggStatus == noErr, agg != kAudioObjectUnknown else {
-      AudioHardwareDestroyProcessTap(tapID)
-      tapID = kAudioObjectUnknown
-      throw TapError.createAggregate(aggStatus)
+    // Prefer aggregate tied to the current default output (works with BT headphones /
+    // AirPods A2DP). Fall back to tap-only if that fails.
+    do {
+      try createAggregate(tapUUID: desc.uuid.uuidString, withOutputDevice: true)
+    } catch {
+      try createAggregate(tapUUID: desc.uuid.uuidString, withOutputDevice: false)
     }
-    aggregateID = agg
 
     let channels = max(1, Int(asbd.mChannelsPerFrame))
     var procID: AudioDeviceIOProcID?
@@ -99,7 +98,7 @@ final class SpotifyTap {
       throw TapError.start(startStatus)
     }
     isRunning = true
-    _ = asbd // silence unused if format unused elsewhere
+    lastBufferAt = CFAbsoluteTimeGetCurrent()
   }
 
   func stop() {
@@ -117,9 +116,50 @@ final class SpotifyTap {
       AudioHardwareDestroyProcessTap(tapID)
       tapID = kAudioObjectUnknown
     }
+    rmsLock.lock()
+    recentRMS = 0
+    rmsLock.unlock()
   }
 
   deinit { stop() }
+
+  // MARK: - Aggregate
+
+  private func createAggregate(tapUUID: String, withOutputDevice: Bool) throws {
+    let aggregateUID = "com.vivianqiao.copet.spotify.\(UUID().uuidString)"
+    var description: [String: Any] = [
+      kAudioAggregateDeviceNameKey: "CoPet Spotify Tap",
+      kAudioAggregateDeviceUIDKey: aggregateUID,
+      kAudioAggregateDeviceIsPrivateKey: true,
+      kAudioAggregateDeviceIsStackedKey: false,
+      kAudioAggregateDeviceTapAutoStartKey: true,
+      kAudioAggregateDeviceTapListKey: [[
+        kAudioSubTapUIDKey: tapUUID,
+        kAudioSubTapDriftCompensationKey: true,
+      ]],
+    ]
+
+    if withOutputDevice,
+       let outputUID = try? Self.readDefaultOutputUID()
+    {
+      // Clock the aggregate off the device actually playing (speakers or BT headphones).
+      description[kAudioAggregateDeviceMainSubDeviceKey] = outputUID
+      description[kAudioAggregateDeviceSubDeviceListKey] = [[
+        kAudioSubDeviceUIDKey: outputUID,
+      ]]
+    }
+
+    var agg = AudioObjectID(kAudioObjectUnknown)
+    let aggStatus = AudioHardwareCreateAggregateDevice(description as CFDictionary, &agg)
+    guard aggStatus == noErr, agg != kAudioObjectUnknown else {
+      if !withOutputDevice {
+        AudioHardwareDestroyProcessTap(tapID)
+        tapID = kAudioObjectUnknown
+      }
+      throw TapError.createAggregate(aggStatus)
+    }
+    aggregateID = agg
+  }
 
   // MARK: - IO
 
@@ -138,22 +178,35 @@ final class SpotifyTap {
     }
 
     let interleaved = (asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved) == 0
+    var sumSq: Double = 0
     if interleaved, channels >= 1 {
       raw.withMemoryRebound(to: Float.self, capacity: frames * channels) { ptr in
         for i in 0..<frames {
+          let s: Float
           if channels == 1 {
-            monoScratch[i] = ptr[i]
+            s = ptr[i]
           } else {
-            monoScratch[i] = 0.5 * (ptr[i * channels] + ptr[i * channels + 1])
+            s = 0.5 * (ptr[i * channels] + ptr[i * channels + 1])
           }
+          monoScratch[i] = s
+          sumSq += Double(s) * Double(s)
         }
       }
     } else {
-      // Non-interleaved: use first channel buffer.
       raw.withMemoryRebound(to: Float.self, capacity: frames) { ptr in
-        for i in 0..<frames { monoScratch[i] = ptr[i] }
+        for i in 0..<frames {
+          let s = ptr[i]
+          monoScratch[i] = s
+          sumSq += Double(s) * Double(s)
+        }
       }
     }
+
+    let rms = sqrt(sumSq / Double(frames))
+    rmsLock.lock()
+    recentRMS = recentRMS * 0.85 + rms * 0.15
+    rmsLock.unlock()
+    lastBufferAt = CFAbsoluteTimeGetCurrent()
 
     monoScratch.withUnsafeBufferPointer { bp in
       guard let base = bp.baseAddress else { return }
@@ -163,7 +216,6 @@ final class SpotifyTap {
 
   // MARK: - Process discovery
 
-  /// Every Core Audio process object for Spotify + helpers (`com.spotify.client*`).
   static func spotifyProcessObjectIDs() -> [AudioObjectID] {
     let list: [AudioObjectID]
     do {
@@ -182,10 +234,9 @@ final class SpotifyTap {
   }
 
   static func isSpotifyRunning() -> Bool {
-    !spotifyProcessObjectIDs().isEmpty
-      || NSWorkspace.shared.runningApplications.contains {
-        ($0.bundleIdentifier ?? "").hasPrefix("com.spotify.client")
-      }
+    NSWorkspace.shared.runningApplications.contains {
+      ($0.bundleIdentifier ?? "").hasPrefix("com.spotify.client")
+    }
   }
 
   private static func fallbackFromRunningApps() -> [AudioObjectID] {
@@ -197,6 +248,31 @@ final class SpotifyTap {
       }
     }
     return ids
+  }
+
+  private static func readDefaultOutputUID() throws -> String {
+    var addr = AudioObjectPropertyAddress(
+      mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+      mScope: kAudioObjectPropertyScopeGlobal,
+      mElement: kAudioObjectPropertyElementMain)
+    var device = AudioObjectID(kAudioObjectUnknown)
+    var size = UInt32(MemoryLayout<AudioObjectID>.size)
+    var err = AudioObjectGetPropertyData(
+      AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &device)
+    guard err == noErr, device != kAudioObjectUnknown else {
+      throw TapError.createAggregate(err)
+    }
+
+    addr.mSelector = kAudioDevicePropertyDeviceUID
+    size = 0
+    err = AudioObjectGetPropertyDataSize(device, &addr, 0, nil, &size)
+    guard err == noErr, size > 0 else { throw TapError.createAggregate(err) }
+    var cf: Unmanaged<CFString>?
+    err = withUnsafeMutablePointer(to: &cf) { ptr in
+      AudioObjectGetPropertyData(device, &addr, 0, nil, &size, ptr)
+    }
+    guard err == noErr, let cf else { throw TapError.createAggregate(err) }
+    return cf.takeRetainedValue() as String
   }
 
   private static func readProcessObjectList() throws -> [AudioObjectID] {

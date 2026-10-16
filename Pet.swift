@@ -1623,7 +1623,7 @@ import AppKit
     let a = NSAlert()
     a.messageText = "Dance to Spotify?"
     a.informativeText =
-      "Mochi listens only to the Spotify desktop app (not calls, YouTube, or notifications) and finds the beat on-device. macOS will ask once for audio-capture permission under Screen & System Audio Recording."
+      "Mochi listens only to the Spotify desktop app (speakers or Bluetooth headphones — both fine) and finds the beat on-device. Allow CoPet under System Settings → Privacy & Security → Screen & System Audio Recording when asked. Also allow Automation → Spotify if macOS prompts."
     a.addButton(withTitle: "Turn on")
     a.addButton(withTitle: "Cancel")
     NSApp.activate(ignoringOtherApps: true)
@@ -1637,14 +1637,21 @@ import AppKit
     let dance = SpotifyDance.shared
     dance.onBeat = { [weak self] in self?.pulseToBeat() }
     dance.onTrackChange = { [weak self] track in
-      guard let self, self.dancingToSpotify || dance.enabled else { return }
+      guard let self, dance.enabled else { return }
       self.say("vibing to \(track.name)", seconds: 2.4, force: false)
     }
     dance.onPlayingChange = { [weak self] playing in
       guard let self else { return }
       self.dancingToSpotify = playing && dance.enabled
-      if !playing, self.activity == .fall {
-        // Let the current micro-hop land; no extra work.
+    }
+    dance.onError = { [weak self] message in
+      // Short tip — full Settings path is in the alert if they re-toggle.
+      if message.localizedCaseInsensitiveContains("Screen & System Audio") {
+        self?.say("need audio permission…", seconds: 3.2)
+      } else if message.localizedCaseInsensitiveContains("isn’t running") {
+        self?.say("open Spotify first", seconds: 2.5)
+      } else {
+        self?.say("can’t hear Spotify…", seconds: 2.8)
       }
     }
     if dance.enabled { dance.start() }
